@@ -115,10 +115,16 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	}}, rules...)
 	services := []any{"HandlerService", "RoutingService", "StatsService"}
 	cfg["stats"] = map[string]any{}
-	cfg["policy"] = map[string]any{"system": map[string]any{
-		"statsInboundUplink": true, "statsInboundDownlink": true,
-		"statsOutboundUplink": true, "statsOutboundDownlink": true,
-	}}
+	cfg["policy"] = map[string]any{
+		"system": map[string]any{
+			"statsInboundUplink": true, "statsInboundDownlink": true,
+			"statsOutboundUplink": true, "statsOutboundDownlink": true,
+		},
+		// Level 0 = per-user (per-client) byte counters, for multi-user inbounds.
+		"levels": map[string]any{
+			"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true},
+		},
+	}
 
 	var balancers []any
 	if len(sl) > 0 {
@@ -228,15 +234,11 @@ func buildInbound(in Inbound) (map[string]any, error) {
 		ib["settings"] = map[string]any{"udp": true, "auth": "noauth"}
 		return ib, nil // socks has no transport/security
 	case "vless":
-		client := map[string]any{"id": in.UUID}
-		if in.Flow != "" {
-			client["flow"] = in.Flow
-		}
-		ib["settings"] = map[string]any{"clients": []any{client}, "decryption": "none"}
+		ib["settings"] = map[string]any{"clients": inboundClients(in), "decryption": "none"}
 	case "vmess":
-		ib["settings"] = map[string]any{"clients": []any{map[string]any{"id": in.UUID, "alterId": 0}}}
+		ib["settings"] = map[string]any{"clients": inboundClients(in)}
 	case "trojan":
-		ib["settings"] = map[string]any{"clients": []any{map[string]any{"password": in.Password}}}
+		ib["settings"] = map[string]any{"clients": inboundClients(in)}
 	default:
 		return nil, fmt.Errorf("unsupported inbound protocol %q", in.Protocol)
 	}
@@ -251,6 +253,38 @@ func buildInbound(in Inbound) (map[string]any, error) {
 	// Server inbounds sniff so routing/domain rules can see the real destination.
 	ib["sniffing"] = map[string]any{"enabled": true, "destOverride": []any{"http", "tls"}}
 	return ib, nil
+}
+
+// inboundClients builds the clients array: the primary credential plus every
+// user in in.Users. Each client carries a stats email (level 0) so xray reports
+// per-user byte counters. The daemon has already dropped over-quota users.
+func inboundClients(in Inbound) []any {
+	clients := []any{clientObject(in.Protocol, in.UUID, in.Password, PrimaryUserEmail(in.Name), in.Flow)}
+	for _, u := range in.Users {
+		clients = append(clients, clientObject(in.Protocol, u.UUID, u.Password, u.Email, in.Flow))
+	}
+	return clients
+}
+
+// clientObject builds one client entry for the given protocol.
+func clientObject(protocol, uuid, password, email, flow string) map[string]any {
+	c := map[string]any{"level": 0}
+	if email != "" {
+		c["email"] = email
+	}
+	switch protocol {
+	case "vless":
+		c["id"] = uuid
+		if flow != "" {
+			c["flow"] = flow
+		}
+	case "vmess":
+		c["id"] = uuid
+		c["alterId"] = 0
+	case "trojan":
+		c["password"] = password
+	}
+	return c
 }
 
 // buildInboundStream builds the server-side streamSettings for an inbound.

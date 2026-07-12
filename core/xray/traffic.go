@@ -64,7 +64,7 @@ func ParseStatName(name string, value int64) (StatCounter, bool) {
 		return StatCounter{}, false
 	}
 	kind := parts[0]
-	if kind != KindInbound && kind != KindOutbound {
+	if kind != KindInbound && kind != KindOutbound && kind != KindUser {
 		return StatCounter{}, false
 	}
 	var down bool

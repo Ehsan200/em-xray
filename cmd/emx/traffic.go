@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +38,132 @@ func trafficCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&window, "window", "24h", "chart window: a duration (24h, 48h), '7d', or 'all'")
 	return c
+}
+
+func speedCmd() *cobra.Command {
+	var interval time.Duration
+	c := &cobra.Command{
+		Use:     "speed",
+		Short:   "live throughput per inbound/outbound (↑/↓ per second); Ctrl-C to stop",
+		Aliases: []string{"live", "bw"},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+			defer stop()
+			c, conn, err := dialReady(ctx)
+			if err != nil {
+				return errDaemon(err)
+			}
+			defer conn.Close()
+			return runSpeed(ctx, cmd, c, interval)
+		},
+	}
+	c.Flags().DurationVar(&interval, "interval", time.Second, "refresh interval")
+	return c
+}
+
+// runSpeed polls TrafficLive and renders a live rate table, redrawing in place.
+func runSpeed(ctx context.Context, cmd *cobra.Command, c emxv1.DaemonClient, interval time.Duration) error {
+	type sample struct {
+		up, down int64
+	}
+	prev := map[string]sample{}
+	last := time.Now()
+	tk := time.NewTicker(interval)
+	defer tk.Stop()
+	out := cmd.OutOrStdout()
+	first := true
+
+	poll := func() error {
+		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		reply, err := c.TrafficLive(rctx, &emxv1.Empty{})
+		cancel()
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		dt := now.Sub(last).Seconds()
+		last = now
+
+		type rate struct {
+			kind, name       string
+			upRate, downRate float64
+		}
+		var rates []rate
+		var maxRate float64
+		for _, it := range reply.Items {
+			key := it.Kind + "|" + it.Name
+			p, seen := prev[key]
+			prev[key] = sample{it.Up, it.Down}
+			if !seen || first || dt <= 0 {
+				continue // need two samples to compute a rate
+			}
+			ur := float64(it.Up-p.up) / dt
+			dr := float64(it.Down-p.down) / dt
+			if ur < 0 {
+				ur = 0
+			}
+			if dr < 0 {
+				dr = 0
+			}
+			rates = append(rates, rate{it.Kind, it.Name, ur, dr})
+			if dr+ur > maxRate {
+				maxRate = dr + ur
+			}
+		}
+		first = false
+		sort.Slice(rates, func(i, j int) bool {
+			if rates[i].kind != rates[j].kind {
+				return rates[i].kind < rates[j].kind
+			}
+			return rates[i].downRate+rates[i].upRate > rates[j].downRate+rates[j].upRate
+		})
+
+		fmt.Fprint(out, "\033[H\033[2J") // home + clear
+		fmt.Fprintln(out, trafHeader.Render("Live throughput")+trafDim.Render("  · Ctrl-C to stop"))
+		fmt.Fprintln(out)
+		if len(rates) == 0 {
+			fmt.Fprintln(out, trafDim.Render("  (measuring… or no traffic flowing)"))
+			return nil
+		}
+		nameW := 4
+		for _, r := range rates {
+			if n := len([]rune(r.name)); n > nameW {
+				nameW = n
+			}
+		}
+		if nameW > 20 {
+			nameW = 20
+		}
+		curKind := ""
+		for _, r := range rates {
+			if r.kind != curKind {
+				curKind = r.kind
+				fmt.Fprintln(out, trafHeader.Render(strings.ToUpper(r.kind)+"S"))
+			}
+			name := padRight(truncMiddle(r.name, nameW), nameW)
+			bar := magBar(int64(r.downRate+r.upRate), int64(maxRate), 14)
+			fmt.Fprintf(out, "  %s %s  %s %s\n",
+				trafHeader.Render(name), bar,
+				trafDown.Render(fmt.Sprintf("↓%s/s", humanBytes(int64(r.downRate)))),
+				trafUp.Render(fmt.Sprintf("↑%s/s", humanBytes(int64(r.upRate)))))
+		}
+		return nil
+	}
+
+	if err := poll(); err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(out)
+			return nil
+		case <-tk.C:
+			if err := poll(); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // parseWindow accepts a Go duration, an "Nd" days form, or "all".

@@ -235,6 +235,45 @@ func (s *Server) Traffic(ctx context.Context, req *emxv1.TrafficRequest) (*emxv1
 	}, nil
 }
 
+// TrafficLive returns current cumulative counters per user tag. The CLI polls
+// this and diffs consecutive samples to compute a live byte rate.
+func (s *Server) TrafficLive(ctx context.Context, _ *emxv1.Empty) (*emxv1.TrafficLiveReply, error) {
+	counters, err := s.sup.StatsQuery()
+	if err != nil {
+		return nil, err
+	}
+	idx := buildTagIndex(s.store)
+	byKey := map[string]*emxv1.LiveItem{}
+	for _, c := range counters {
+		name, keep := idx.lookup(c.Kind, c.Tag)
+		if !keep {
+			continue
+		}
+		key := c.Kind + "|" + c.Tag
+		li := byKey[key]
+		if li == nil {
+			li = &emxv1.LiveItem{Kind: c.Kind, Name: name}
+			byKey[key] = li
+		}
+		if c.Down {
+			li.Down = c.Bytes
+		} else {
+			li.Up = c.Bytes
+		}
+	}
+	items := make([]*emxv1.LiveItem, 0, len(byKey))
+	for _, li := range byKey {
+		items = append(items, li)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Kind != items[j].Kind {
+			return items[i].Kind < items[j].Kind
+		}
+		return items[i].Name < items[j].Name
+	})
+	return &emxv1.TrafficLiveReply{Items: items}, nil
+}
+
 // sortTrafficDesc orders items by lifetime total (down+up) descending.
 func sortTrafficDesc(items []*emxv1.TrafficItem) {
 	sort.Slice(items, func(i, j int) bool {

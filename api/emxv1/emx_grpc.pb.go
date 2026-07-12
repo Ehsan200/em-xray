@@ -19,34 +19,41 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Daemon_Ping_FullMethodName               = "/emx.v1.Daemon/Ping"
-	Daemon_Status_FullMethodName             = "/emx.v1.Daemon/Status"
-	Daemon_Shutdown_FullMethodName           = "/emx.v1.Daemon/Shutdown"
-	Daemon_TemplateList_FullMethodName       = "/emx.v1.Daemon/TemplateList"
-	Daemon_EntryAdd_FullMethodName           = "/emx.v1.Daemon/EntryAdd"
-	Daemon_EntryList_FullMethodName          = "/emx.v1.Daemon/EntryList"
-	Daemon_EntryRemove_FullMethodName        = "/emx.v1.Daemon/EntryRemove"
-	Daemon_EntryRename_FullMethodName        = "/emx.v1.Daemon/EntryRename"
-	Daemon_EntryDuplicate_FullMethodName     = "/emx.v1.Daemon/EntryDuplicate"
-	Daemon_EntryGetConfig_FullMethodName     = "/emx.v1.Daemon/EntryGetConfig"
-	Daemon_EntrySetConfig_FullMethodName     = "/emx.v1.Daemon/EntrySetConfig"
-	Daemon_InboundAdd_FullMethodName         = "/emx.v1.Daemon/InboundAdd"
-	Daemon_InboundList_FullMethodName        = "/emx.v1.Daemon/InboundList"
-	Daemon_InboundRemove_FullMethodName      = "/emx.v1.Daemon/InboundRemove"
-	Daemon_InboundDuplicate_FullMethodName   = "/emx.v1.Daemon/InboundDuplicate"
-	Daemon_InboundGetConfig_FullMethodName   = "/emx.v1.Daemon/InboundGetConfig"
-	Daemon_InboundSetConfig_FullMethodName   = "/emx.v1.Daemon/InboundSetConfig"
-	Daemon_Winners_FullMethodName            = "/emx.v1.Daemon/Winners"
-	Daemon_Traffic_FullMethodName            = "/emx.v1.Daemon/Traffic"
-	Daemon_SubAdd_FullMethodName             = "/emx.v1.Daemon/SubAdd"
-	Daemon_SubList_FullMethodName            = "/emx.v1.Daemon/SubList"
-	Daemon_SubRemove_FullMethodName          = "/emx.v1.Daemon/SubRemove"
-	Daemon_SubSetEnabled_FullMethodName      = "/emx.v1.Daemon/SubSetEnabled"
-	Daemon_SubRefresh_FullMethodName         = "/emx.v1.Daemon/SubRefresh"
-	Daemon_SubNodes_FullMethodName           = "/emx.v1.Daemon/SubNodes"
-	Daemon_SubSetNodeDisabled_FullMethodName = "/emx.v1.Daemon/SubSetNodeDisabled"
-	Daemon_SubRename_FullMethodName          = "/emx.v1.Daemon/SubRename"
-	Daemon_SubSetOptions_FullMethodName      = "/emx.v1.Daemon/SubSetOptions"
+	Daemon_Ping_FullMethodName                  = "/emx.v1.Daemon/Ping"
+	Daemon_Status_FullMethodName                = "/emx.v1.Daemon/Status"
+	Daemon_Shutdown_FullMethodName              = "/emx.v1.Daemon/Shutdown"
+	Daemon_TemplateList_FullMethodName          = "/emx.v1.Daemon/TemplateList"
+	Daemon_EntryAdd_FullMethodName              = "/emx.v1.Daemon/EntryAdd"
+	Daemon_EntryList_FullMethodName             = "/emx.v1.Daemon/EntryList"
+	Daemon_EntryRemove_FullMethodName           = "/emx.v1.Daemon/EntryRemove"
+	Daemon_EntryRename_FullMethodName           = "/emx.v1.Daemon/EntryRename"
+	Daemon_EntryDuplicate_FullMethodName        = "/emx.v1.Daemon/EntryDuplicate"
+	Daemon_EntryGetConfig_FullMethodName        = "/emx.v1.Daemon/EntryGetConfig"
+	Daemon_EntrySetConfig_FullMethodName        = "/emx.v1.Daemon/EntrySetConfig"
+	Daemon_InboundAdd_FullMethodName            = "/emx.v1.Daemon/InboundAdd"
+	Daemon_InboundList_FullMethodName           = "/emx.v1.Daemon/InboundList"
+	Daemon_InboundRemove_FullMethodName         = "/emx.v1.Daemon/InboundRemove"
+	Daemon_InboundDuplicate_FullMethodName      = "/emx.v1.Daemon/InboundDuplicate"
+	Daemon_InboundGetConfig_FullMethodName      = "/emx.v1.Daemon/InboundGetConfig"
+	Daemon_InboundSetConfig_FullMethodName      = "/emx.v1.Daemon/InboundSetConfig"
+	Daemon_InboundUserAdd_FullMethodName        = "/emx.v1.Daemon/InboundUserAdd"
+	Daemon_InboundUserList_FullMethodName       = "/emx.v1.Daemon/InboundUserList"
+	Daemon_InboundUserRemove_FullMethodName     = "/emx.v1.Daemon/InboundUserRemove"
+	Daemon_InboundUserSetEnabled_FullMethodName = "/emx.v1.Daemon/InboundUserSetEnabled"
+	Daemon_Winners_FullMethodName               = "/emx.v1.Daemon/Winners"
+	Daemon_Traffic_FullMethodName               = "/emx.v1.Daemon/Traffic"
+	Daemon_TrafficLive_FullMethodName           = "/emx.v1.Daemon/TrafficLive"
+	Daemon_ExportConfig_FullMethodName          = "/emx.v1.Daemon/ExportConfig"
+	Daemon_ImportConfig_FullMethodName          = "/emx.v1.Daemon/ImportConfig"
+	Daemon_SubAdd_FullMethodName                = "/emx.v1.Daemon/SubAdd"
+	Daemon_SubList_FullMethodName               = "/emx.v1.Daemon/SubList"
+	Daemon_SubRemove_FullMethodName             = "/emx.v1.Daemon/SubRemove"
+	Daemon_SubSetEnabled_FullMethodName         = "/emx.v1.Daemon/SubSetEnabled"
+	Daemon_SubRefresh_FullMethodName            = "/emx.v1.Daemon/SubRefresh"
+	Daemon_SubNodes_FullMethodName              = "/emx.v1.Daemon/SubNodes"
+	Daemon_SubSetNodeDisabled_FullMethodName    = "/emx.v1.Daemon/SubSetNodeDisabled"
+	Daemon_SubRename_FullMethodName             = "/emx.v1.Daemon/SubRename"
+	Daemon_SubSetOptions_FullMethodName         = "/emx.v1.Daemon/SubSetOptions"
 )
 
 // DaemonClient is the client API for Daemon service.
@@ -76,10 +83,20 @@ type DaemonClient interface {
 	InboundDuplicate(ctx context.Context, in *DuplicateRequest, opts ...grpc.CallOption) (*InboundReply, error)
 	InboundGetConfig(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*ConfigReply, error)
 	InboundSetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*InboundReply, error)
+	// Multi-user: extra clients on an inbound with per-user traffic + byte caps.
+	InboundUserAdd(ctx context.Context, in *InboundUserAddRequest, opts ...grpc.CallOption) (*InboundUserReply, error)
+	InboundUserList(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*InboundUserListReply, error)
+	InboundUserRemove(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*Empty, error)
+	InboundUserSetEnabled(ctx context.Context, in *SetEnabledRequest, opts ...grpc.CallOption) (*Empty, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WinnersReply, error)
 	// Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
 	Traffic(ctx context.Context, in *TrafficRequest, opts ...grpc.CallOption) (*TrafficReply, error)
+	// TrafficLive: current cumulative counters, for a client-computed live rate.
+	TrafficLive(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*TrafficLiveReply, error)
+	// Backup / restore the full config (inbounds + entries + subscriptions).
+	ExportConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error)
+	ImportConfig(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error)
 	// Subscriptions (node pools consumed by masters via xraysub:NAME).
 	SubAdd(ctx context.Context, in *SubAddRequest, opts ...grpc.CallOption) (*SubReply, error)
 	SubList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SubListReply, error)
@@ -270,6 +287,46 @@ func (c *daemonClient) InboundSetConfig(ctx context.Context, in *SetConfigReques
 	return out, nil
 }
 
+func (c *daemonClient) InboundUserAdd(ctx context.Context, in *InboundUserAddRequest, opts ...grpc.CallOption) (*InboundUserReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InboundUserReply)
+	err := c.cc.Invoke(ctx, Daemon_InboundUserAdd_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) InboundUserList(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*InboundUserListReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InboundUserListReply)
+	err := c.cc.Invoke(ctx, Daemon_InboundUserList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) InboundUserRemove(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Daemon_InboundUserRemove_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) InboundUserSetEnabled(ctx context.Context, in *SetEnabledRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Daemon_InboundUserSetEnabled_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) Winners(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WinnersReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WinnersReply)
@@ -284,6 +341,36 @@ func (c *daemonClient) Traffic(ctx context.Context, in *TrafficRequest, opts ...
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TrafficReply)
 	err := c.cc.Invoke(ctx, Daemon_Traffic_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) TrafficLive(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*TrafficLiveReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrafficLiveReply)
+	err := c.cc.Invoke(ctx, Daemon_TrafficLive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) ExportConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigReply)
+	err := c.cc.Invoke(ctx, Daemon_ExportConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) ImportConfig(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportReply)
+	err := c.cc.Invoke(ctx, Daemon_ImportConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -407,10 +494,20 @@ type DaemonServer interface {
 	InboundDuplicate(context.Context, *DuplicateRequest) (*InboundReply, error)
 	InboundGetConfig(context.Context, *IdRequest) (*ConfigReply, error)
 	InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error)
+	// Multi-user: extra clients on an inbound with per-user traffic + byte caps.
+	InboundUserAdd(context.Context, *InboundUserAddRequest) (*InboundUserReply, error)
+	InboundUserList(context.Context, *IdRequest) (*InboundUserListReply, error)
+	InboundUserRemove(context.Context, *IdRequest) (*Empty, error)
+	InboundUserSetEnabled(context.Context, *SetEnabledRequest) (*Empty, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(context.Context, *Empty) (*WinnersReply, error)
 	// Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
 	Traffic(context.Context, *TrafficRequest) (*TrafficReply, error)
+	// TrafficLive: current cumulative counters, for a client-computed live rate.
+	TrafficLive(context.Context, *Empty) (*TrafficLiveReply, error)
+	// Backup / restore the full config (inbounds + entries + subscriptions).
+	ExportConfig(context.Context, *Empty) (*ConfigReply, error)
+	ImportConfig(context.Context, *ImportRequest) (*ImportReply, error)
 	// Subscriptions (node pools consumed by masters via xraysub:NAME).
 	SubAdd(context.Context, *SubAddRequest) (*SubReply, error)
 	SubList(context.Context, *Empty) (*SubListReply, error)
@@ -482,11 +579,32 @@ func (UnimplementedDaemonServer) InboundGetConfig(context.Context, *IdRequest) (
 func (UnimplementedDaemonServer) InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InboundSetConfig not implemented")
 }
+func (UnimplementedDaemonServer) InboundUserAdd(context.Context, *InboundUserAddRequest) (*InboundUserReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundUserAdd not implemented")
+}
+func (UnimplementedDaemonServer) InboundUserList(context.Context, *IdRequest) (*InboundUserListReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundUserList not implemented")
+}
+func (UnimplementedDaemonServer) InboundUserRemove(context.Context, *IdRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundUserRemove not implemented")
+}
+func (UnimplementedDaemonServer) InboundUserSetEnabled(context.Context, *SetEnabledRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundUserSetEnabled not implemented")
+}
 func (UnimplementedDaemonServer) Winners(context.Context, *Empty) (*WinnersReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Winners not implemented")
 }
 func (UnimplementedDaemonServer) Traffic(context.Context, *TrafficRequest) (*TrafficReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Traffic not implemented")
+}
+func (UnimplementedDaemonServer) TrafficLive(context.Context, *Empty) (*TrafficLiveReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TrafficLive not implemented")
+}
+func (UnimplementedDaemonServer) ExportConfig(context.Context, *Empty) (*ConfigReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExportConfig not implemented")
+}
+func (UnimplementedDaemonServer) ImportConfig(context.Context, *ImportRequest) (*ImportReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportConfig not implemented")
 }
 func (UnimplementedDaemonServer) SubAdd(context.Context, *SubAddRequest) (*SubReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubAdd not implemented")
@@ -842,6 +960,78 @@ func _Daemon_InboundSetConfig_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_InboundUserAdd_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InboundUserAddRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundUserAdd(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundUserAdd_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundUserAdd(ctx, req.(*InboundUserAddRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_InboundUserList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IdRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundUserList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundUserList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundUserList(ctx, req.(*IdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_InboundUserRemove_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IdRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundUserRemove(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundUserRemove_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundUserRemove(ctx, req.(*IdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_InboundUserSetEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetEnabledRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundUserSetEnabled(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundUserSetEnabled_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundUserSetEnabled(ctx, req.(*SetEnabledRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_Winners_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Empty)
 	if err := dec(in); err != nil {
@@ -874,6 +1064,60 @@ func _Daemon_Traffic_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).Traffic(ctx, req.(*TrafficRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_TrafficLive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).TrafficLive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_TrafficLive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).TrafficLive(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_ExportConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).ExportConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_ExportConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).ExportConfig(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_ImportConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).ImportConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_ImportConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).ImportConfig(ctx, req.(*ImportRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1116,12 +1360,40 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_InboundSetConfig_Handler,
 		},
 		{
+			MethodName: "InboundUserAdd",
+			Handler:    _Daemon_InboundUserAdd_Handler,
+		},
+		{
+			MethodName: "InboundUserList",
+			Handler:    _Daemon_InboundUserList_Handler,
+		},
+		{
+			MethodName: "InboundUserRemove",
+			Handler:    _Daemon_InboundUserRemove_Handler,
+		},
+		{
+			MethodName: "InboundUserSetEnabled",
+			Handler:    _Daemon_InboundUserSetEnabled_Handler,
+		},
+		{
 			MethodName: "Winners",
 			Handler:    _Daemon_Winners_Handler,
 		},
 		{
 			MethodName: "Traffic",
 			Handler:    _Daemon_Traffic_Handler,
+		},
+		{
+			MethodName: "TrafficLive",
+			Handler:    _Daemon_TrafficLive_Handler,
+		},
+		{
+			MethodName: "ExportConfig",
+			Handler:    _Daemon_ExportConfig_Handler,
+		},
+		{
+			MethodName: "ImportConfig",
+			Handler:    _Daemon_ImportConfig_Handler,
 		},
 		{
 			MethodName: "SubAdd",

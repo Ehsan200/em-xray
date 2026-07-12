@@ -8,6 +8,15 @@ import (
 	"strconv"
 )
 
+// ShareLinkForUser builds the share link for one additional user of an inbound,
+// substituting that user's credential and labelling it "<inbound>-<user>".
+func ShareLinkForUser(in Inbound, host string, u InboundUser) string {
+	in.UUID = u.UUID
+	in.Password = u.Password
+	in.Name = in.Name + "-" + u.Name
+	return ShareLink(in, host)
+}
+
 // ShareLink builds the client-facing share link (vless://, vmess://, trojan://)
 // for an inbound so a user can import it into their client. host overrides
 // in.PublicHost; if both are empty a "SERVER_IP" placeholder is used. Returns ""

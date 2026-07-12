@@ -22,11 +22,12 @@ type TrafficSampler struct {
 	sup       *Supervisor
 	log       *log.Logger
 	last      map[string]int64 // "kind|tag|dir" -> last raw cumulative
+	overCap   map[string]bool  // user emails already reconciled out for cap
 	lastPrune int64
 }
 
 func NewTrafficSampler(store *xray.Store, sup *Supervisor, logger *log.Logger) *TrafficSampler {
-	return &TrafficSampler{store: store, sup: sup, log: logger, last: map[string]int64{}}
+	return &TrafficSampler{store: store, sup: sup, log: logger, last: map[string]int64{}, overCap: map[string]bool{}}
 }
 
 // Start samples immediately, then every trafficSampleTick until ctx is done.
@@ -96,6 +97,8 @@ func (t *TrafficSampler) poll() {
 		}
 	}
 
+	t.enforceCaps()
+
 	// Prune stale buckets once per hour.
 	if hour != t.lastPrune {
 		cut := xray.HourFloor(time.Now().Add(-xray.TrafficRetention))
@@ -109,18 +112,34 @@ func (t *TrafficSampler) poll() {
 // tagIndex maps live inbound/outbound tags back to display names, and decides
 // which tags to keep (user inbounds, user entries/masters, and direct egress).
 type tagIndex struct {
-	in  map[string]string
-	out map[string]string
+	in   map[string]string
+	out  map[string]string
+	user map[string]string
 }
 
-func (t *TrafficSampler) tagIndex() tagIndex {
-	idx := tagIndex{in: map[string]string{}, out: map[string]string{"direct": "direct"}}
-	if ins, err := t.store.ListInbounds(); err == nil {
+func (t *TrafficSampler) tagIndex() tagIndex { return buildTagIndex(t.store) }
+
+// buildTagIndex maps live inbound/outbound/user tags back to display names,
+// keeping user inbounds, user entries/masters, direct egress, and per-user
+// (per-client) email tags.
+func buildTagIndex(store *xray.Store) tagIndex {
+	idx := tagIndex{
+		in:   map[string]string{},
+		out:  map[string]string{"direct": "direct"},
+		user: map[string]string{},
+	}
+	if ins, err := store.ListInbounds(); err == nil {
 		for _, in := range ins {
 			idx.in[xray.InboundTag(in.Name)] = in.Name
+			idx.user[xray.PrimaryUserEmail(in.Name)] = in.Name // primary client email
+			if us, err := store.InboundUsers(in.ID); err == nil {
+				for _, u := range us {
+					idx.user[u.Email] = in.Name + "/" + u.Name
+				}
+			}
 		}
 	}
-	if ents, err := t.store.ListEntries(); err == nil {
+	if ents, err := store.ListEntries(); err == nil {
 		for _, e := range ents {
 			idx.out[xray.OutboundTag(e.Name)] = e.Name
 		}
@@ -129,12 +148,55 @@ func (t *TrafficSampler) tagIndex() tagIndex {
 }
 
 func (i tagIndex) lookup(kind, tag string) (string, bool) {
-	if kind == xray.KindInbound {
+	switch kind {
+	case xray.KindInbound:
 		n, ok := i.in[tag]
 		return n, ok
+	case xray.KindUser:
+		n, ok := i.user[tag]
+		return n, ok
+	default:
+		n, ok := i.out[tag]
+		return n, ok
 	}
-	n, ok := i.out[tag]
-	return n, ok
+}
+
+// enforceCaps denies users whose lifetime usage has reached their byte cap by
+// triggering a reconcile (which drops them from the config). It reconciles only
+// on the transition into over-cap, so it doesn't churn every poll.
+func (t *TrafficSampler) enforceCaps() {
+	ins, err := t.store.ListInbounds()
+	if err != nil {
+		return
+	}
+	trigger := false
+	for _, in := range ins {
+		users, err := t.store.InboundUsers(in.ID)
+		if err != nil {
+			continue
+		}
+		for _, u := range users {
+			if !u.Enabled || u.ByteCap <= 0 {
+				continue
+			}
+			up, down := t.store.TrafficTotalFor(xray.KindUser, u.Email)
+			over := up+down >= u.ByteCap
+			switch {
+			case over && !t.overCap[u.Email]:
+				t.overCap[u.Email] = true
+				trigger = true
+				t.log.Printf("user %q over byte cap — denying access", in.Name+"/"+u.Name)
+			case !over && t.overCap[u.Email]:
+				delete(t.overCap, u.Email) // cap raised/reset → re-admit next reconcile
+				trigger = true
+			}
+		}
+	}
+	if trigger {
+		if err := t.sup.Reconcile(); err != nil {
+			t.log.Printf("traffic: cap reconcile failed: %v", err)
+		}
+	}
 }
 
 func dirKey(down bool) string {

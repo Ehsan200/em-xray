@@ -112,12 +112,14 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 		title := fmt.Sprintf("Inbound: %s (%s :%d → %s)", in.Name, in.Protocol, in.Port, in.Target)
 		i, ok := runSelect(title, []selectItem{
 			{"Show client link", ""},
+			{"Show QR code", ""},
+			{"Manage users", "extra clients + byte caps"},
 			{"Duplicate", ""},
 			{"Edit JSON", ""},
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 4 {
+		if !ok || i == 6 {
 			return
 		}
 		switch i {
@@ -128,6 +130,10 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 				notify("(this protocol has no share link)")
 			}
 		case 1:
+			fmt.Printf("\n%s\n\n%s\n%s\n", in.Name, renderQR(in.ShareLink), in.ShareLink)
+		case 2:
+			s.usersMenu(in)
+		case 3:
 			name, _ := runInput("Name for the copy", in.Name+" copy")
 			ctx, cancel := call()
 			reply, err := s.c.InboundDuplicate(ctx, &emxv1.DuplicateRequest{Id: in.Id, NewName: name})
@@ -137,9 +143,9 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 			} else {
 				notify("duplicated to %s (:%d)", reply.Inbound.Name, reply.Inbound.Port)
 			}
-		case 2:
+		case 4:
 			s.editConfig("inbound", in.Id)
-		case 3:
+		case 5:
 			if confirm("Remove inbound " + in.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.InboundRemove(ctx, &emxv1.IdRequest{Id: in.Id})
@@ -150,6 +156,104 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 					notify("removed %s", in.Name)
 					return
 				}
+			}
+		}
+	}
+}
+
+// usersMenu manages the extra clients of an inbound.
+func (s *menuSession) usersMenu(in *emxv1.InboundInfo) {
+	for {
+		ctx, cancel := call()
+		reply, err := s.c.InboundUserList(ctx, &emxv1.IdRequest{Id: in.Id})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+			return
+		}
+		items := make([]selectItem, 0, len(reply.Users)+2)
+		for _, u := range reply.Users {
+			state := "enabled"
+			if !u.Enabled {
+				state = "disabled"
+			}
+			if u.OverCap {
+				state = "OVER CAP"
+			}
+			desc := fmt.Sprintf("%s · used %s", state, humanBytes(u.UsedUp+u.UsedDown))
+			if u.ByteCap > 0 {
+				desc += " / " + humanBytes(u.ByteCap)
+			}
+			items = append(items, selectItem{label: u.Name, desc: desc})
+		}
+		items = append(items, selectItem{label: "+ Add user"}, selectItem{label: "← Back"})
+		i, ok := runSelect("Users of "+in.Name, items)
+		if !ok || i == len(items)-1 {
+			return
+		}
+		if i == len(items)-2 {
+			s.userAdd(in)
+			continue
+		}
+		s.userActions(in, reply.Users[i])
+	}
+}
+
+func (s *menuSession) userAdd(in *emxv1.InboundInfo) {
+	name, ok := runInput("User name", "")
+	if !ok || name == "" {
+		return
+	}
+	capStr, _ := runInput("Byte cap (e.g. 10GB, blank = unlimited)", "")
+	capBytes, err := parseSize(capStr)
+	if err != nil {
+		notify("bad cap: %v", err)
+		return
+	}
+	ctx, cancel := call()
+	reply, err := s.c.InboundUserAdd(ctx, &emxv1.InboundUserAddRequest{InboundId: in.Id, Name: name, ByteCap: capBytes})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	fmt.Printf("\n%s\n\n%s\n%s\n", reply.User.Name, renderQR(reply.User.ShareLink), reply.User.ShareLink)
+}
+
+func (s *menuSession) userActions(in *emxv1.InboundInfo, u *emxv1.UserInfo) {
+	toggle := "Disable"
+	if !u.Enabled {
+		toggle = "Enable"
+	}
+	i, ok := runSelect(fmt.Sprintf("User: %s", u.Name), []selectItem{
+		{"Show link", ""}, {"Show QR code", ""}, {toggle, ""}, {"Remove", ""}, {"← Back", ""},
+	})
+	if !ok || i == 4 {
+		return
+	}
+	switch i {
+	case 0:
+		fmt.Println("\n" + u.ShareLink + "\n")
+	case 1:
+		fmt.Printf("\n%s\n\n%s\n%s\n", u.Name, renderQR(u.ShareLink), u.ShareLink)
+	case 2:
+		ctx, cancel := call()
+		_, err := s.c.InboundUserSetEnabled(ctx, &emxv1.SetEnabledRequest{Id: u.Id, Enabled: !u.Enabled})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+		} else {
+			notify("%s %s", map[bool]string{true: "enabled", false: "disabled"}[!u.Enabled], u.Name)
+		}
+	case 3:
+		if confirm("Remove user " + u.Name + "?") {
+			ctx, cancel := call()
+			_, err := s.c.InboundUserRemove(ctx, &emxv1.IdRequest{Id: u.Id})
+			cancel()
+			if err != nil {
+				notify("error: %v", err)
+			} else {
+				notify("removed %s", u.Name)
 			}
 		}
 	}

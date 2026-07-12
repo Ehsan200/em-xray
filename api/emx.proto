@@ -31,11 +31,23 @@ service Daemon {
   rpc InboundGetConfig(IdRequest) returns (ConfigReply);    // editable inbound JSON
   rpc InboundSetConfig(SetConfigRequest) returns (InboundReply);
 
+  // Multi-user: extra clients on an inbound with per-user traffic + byte caps.
+  rpc InboundUserAdd(InboundUserAddRequest) returns (InboundUserReply);
+  rpc InboundUserList(IdRequest) returns (InboundUserListReply); // id = inbound id
+  rpc InboundUserRemove(IdRequest) returns (Empty);             // id = user id
+  rpc InboundUserSetEnabled(SetEnabledRequest) returns (Empty); // id = user id
+
   // Winner: the current fastest (balancer-selected) node per master.
   rpc Winners(Empty) returns (WinnersReply);
 
   // Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
   rpc Traffic(TrafficRequest) returns (TrafficReply);
+  // TrafficLive: current cumulative counters, for a client-computed live rate.
+  rpc TrafficLive(Empty) returns (TrafficLiveReply);
+
+  // Backup / restore the full config (inbounds + entries + subscriptions).
+  rpc ExportConfig(Empty) returns (ConfigReply);
+  rpc ImportConfig(ImportRequest) returns (ImportReply);
 
   // Subscriptions (node pools consumed by masters via xraysub:NAME).
   rpc SubAdd(SubAddRequest) returns (SubReply);
@@ -91,6 +103,14 @@ message TrafficReply {
   int64 window_sec = 3;
   int32 buckets = 4; // number of hourly buckets in each hourly_* array
 }
+
+message LiveItem {
+  string kind = 1; // inbound|outbound
+  string name = 2;
+  int64 up = 3;    // cumulative bytes since xray started
+  int64 down = 4;
+}
+message TrafficLiveReply { repeated LiveItem items = 1; }
 
 message SubAddRequest {
   string name = 1;
@@ -155,6 +175,19 @@ message ConfigReply { string json = 1; }
 message SetConfigRequest {
   uint32 id = 1;
   string json = 2;
+}
+
+// ImportRequest restores a config backup. replace=true wipes existing config
+// first; replace=false merges, skipping name conflicts.
+message ImportRequest {
+  string json = 1;
+  bool replace = 2;
+}
+message ImportReply {
+  int32 inbounds = 1;
+  int32 entries = 2;
+  int32 subs = 3;
+  repeated string skipped = 4; // names skipped on conflict (merge mode)
 }
 
 message PingRequest {}
@@ -228,3 +261,21 @@ message InboundInfo {
 }
 message InboundReply { InboundInfo inbound = 1; }
 message InboundListReply { repeated InboundInfo inbounds = 1; }
+
+message InboundUserAddRequest {
+  uint32 inbound_id = 1;
+  string name = 2;
+  int64 byte_cap = 3; // 0 = unlimited
+}
+message UserInfo {
+  uint32 id = 1;
+  string name = 2;
+  bool enabled = 3;
+  int64 byte_cap = 4;
+  int64 used_up = 5;
+  int64 used_down = 6;
+  bool over_cap = 7;
+  string share_link = 8;
+}
+message InboundUserReply { UserInfo user = 1; }
+message InboundUserListReply { repeated UserInfo users = 1; }

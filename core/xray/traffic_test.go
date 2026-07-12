@@ -17,7 +17,7 @@ func TestParseStatName(t *testing.T) {
 		{"outbound>>>out-alpha>>>traffic>>>uplink", true, KindOutbound, "out-alpha", false},
 		{"outbound>>>direct>>>traffic>>>downlink", true, KindOutbound, "direct", true},
 		{"inbound>>>api>>>traffic>>>uplink", true, KindInbound, "api", false},
-		{"user>>>x>>>traffic>>>uplink", false, "", "", false},
+		{"user>>>srv.alice>>>traffic>>>uplink", true, KindUser, "srv.alice", false},
 		{"observatory>>>foo", false, "", "", false},
 		{"inbound>>>x>>>traffic>>>sideways", false, "", "", false},
 	}

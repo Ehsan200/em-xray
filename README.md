@@ -5,8 +5,9 @@ into a **master dialer with subscription-backed node pools**: subscription URLs 
 of nodes, and a "master" outbound tunnels its own server connection through **whichever node in the
 pool is currently fastest** — with **zero xray restarts** on node churn.
 
-It also runs as a **server**: expose a `vless` / `vmess` / `socks` listener (keys auto-generated,
-client share-link printed) whose traffic egresses through a master's fastest node.
+It also runs as a **server**: expose a `vless` / `vmess` / `trojan` / `socks` listener (keys +
+self-signed TLS certs auto-generated, client share-link + QR printed) whose traffic egresses through a
+master's fastest node — with **per-user accounts, byte quotas, and live traffic charts**.
 
 ```
 your client ──vless/reality──▶ emx inbound ──▶ master ──dialerProxy──▶ fastest node ──▶ internet
@@ -21,8 +22,16 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
   balancer picks the winner. Nodes never listen on ports; they're outbounds ranked by live latency.
 - **Zero-restart churn** — a subscription refresh, node enable/disable, or cap change updates the
   live pool over xray's gRPC API (`ado`/`rmo`), never restarting xray or dropping connections.
-- **Server mode** — create a `vless-reality` / `vmess` / `socks` inbound with one command; UUID,
-  REALITY keypair and shortId are auto-generated and the client share-link is printed.
+- **Server mode** — create an inbound from 14 built-in templates (vless/vmess/trojan × reality/TLS ×
+  tcp/ws/grpc/xhttp/httpupgrade) with one command; UUID, REALITY keypair, and **self-signed TLS
+  certs** (via `xray tls cert`, no domain needed) are auto-generated and the client share-link + a
+  scannable **QR code** are printed.
+- **Multi-user + quotas** — add many client accounts to one listener, each with its own UUID/link and
+  an optional **byte cap**; a user that hits their quota is dropped from the config automatically.
+- **Traffic charts** — per-inbound/outbound byte totals (24h / all-time) as terminal sparklines, a
+  **live ↑/↓ speed meter**, and per-user usage. xray's stats API is sampled into hourly buckets.
+- **Backup / restore** — export the whole config (inbounds + entries + subscriptions) to one JSON
+  file and import it back, merge or replace.
 - **Self-managed daemon** — `emx start` detaches into the background, supervises the xray child, and
   restarts it on crash with exponential backoff. No systemd, no root required.
 - **Interactive TUI** — run any command bare (`emx`, `emx sub`, `emx in`…) for arrow-key menus.
@@ -90,9 +99,19 @@ emx entry add mymaster \
 
 # 3. expose a server for your devices, egressing through the master
 emx in add gate --to master:mymaster       # prints a client vless://… link
+emx in qr 1                                # same link as a scannable QR code
 
-# see which node is currently fastest
+# see which node is currently fastest, and how much traffic has flowed
 emx winner
+emx traffic                                # per-inbound/outbound charts (24h + all-time)
+emx speed                                  # live ↑/↓ throughput, Ctrl-C to stop
+```
+
+Add extra client accounts to a listener, each with its own link and an optional quota:
+
+```bash
+emx in user add 1 alice --cap 50GB         # own uuid/link; access denied once 50 GB is used
+emx in user ls 1                           # usage vs cap per user
 ```
 
 Prefer menus? Just run `emx` (or `emx sub`, `emx in`, `emx entry`) with no arguments.
@@ -132,6 +151,7 @@ The running daemon also checks for new releases every 6h and flags it in `emx st
 | **Subscription** | A remote URL yielding a volatile pool of nodes. Never a route target by itself — consumed only inside a master's dialer. |
 | **Node** | One member of a subscription pool. Ranked fastest-first by the observatory. Never listens on a port. |
 | **Inbound** | A server listener (`vless`/`vmess`/`socks`/`trojan`) you expose, routed to a **Target**. |
+| **User** | An extra client on an inbound — its own credential/link, per-user traffic, and an optional byte cap. The inbound's own key is the primary client. |
 | **Target** | Where an inbound egresses: `master:NAME` (fastest node) · `xray:NAME` (one entry) · `direct`. |
 
 **Dialer refs** (comma-separated): `xray:NAME` (one entry), `xraysub:NAME` (a subscription's active
@@ -148,17 +168,31 @@ emx version                                 emx + embedded xray versions
 
 emx sub add <name> <url>                    add + fetch a subscription
 emx sub ls | rm <id> | rename <id> <name>
+emx sub info <name>                         metadata card: quota, expiry, last fetch
+emx sub set <id> [--interval S] [--cap N] [--ua UA]   change refresh options
 emx sub enable <id> | disable <id>
-emx sub refresh [id]                        refresh one (or all if omitted)
+emx sub refresh [id]                        refresh one (or all); reports +added/-removed
 emx sub nodes <id>                          list nodes (fingerprint, active, disabled, latency)
 emx sub node-disable <subid> <fingerprint>  durable — survives refresh/restart
 emx sub node-enable  <subid> <fingerprint>
 
 emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>]
 emx entry ls | rm <id> | rename <id> <name>
+emx entry duplicate <id> [name] | edit <id>            clone / edit outbound JSON in $EDITOR
 
 emx in add [name] [--template T] [--to TARGET] [--host H] [--port N]
 emx in ls [--links] | rm <id>
+emx in qr <id>                              share link as a scannable QR code
+emx in duplicate <id> [name]                clone (fresh keys + port)
+emx in edit <id>                            edit the inbound JSON in $EDITOR
+emx in user add <inbound-id> <name> [--cap 10GB]      add a client with own link/quota
+emx in user ls <inbound-id>                 users + usage vs cap
+emx in user rm <user-id> | enable <user-id> | disable <user-id>
+emx in user qr <inbound-id> <user-name>     a user's link as a QR code
+
+emx traffic [--window 24h|7d|all]           per-inbound/outbound charts (totals + sparkline)
+emx speed                                   live ↑/↓ throughput; Ctrl-C to stop
+emx config export [-o file] | import <file> [--replace]   backup / restore all config
 
 emx template ls                             built-in inbound presets
 emx winner                                  current fastest node per master
@@ -170,12 +204,26 @@ non-terminal (pipes, scripts) it prints help, so flag-driven usage stays scripta
 
 ### Templates
 
-| Name | Protocol | Notes |
+Everything is auto-generated — REALITY keypairs, self-signed TLS certs (via `xray tls cert`, no domain
+required; the client link carries `allowInsecure`), UUIDs, shortIds. Run `emx template ls` for the
+live list.
+
+| Name | Transport | Security |
 |---|---|---|
-| `vless-reality` *(default)* | vless + REALITY (vision) | best against active probing; keys auto-generated |
-| `vmess-ws` | vmess + websocket | CDN-friendly |
-| `vmess-tcp` | vmess over tcp | |
-| `socks` | SOCKS5 (loopback) | local proxy |
+| `vless-reality` *(default)* | tcp (vision) | REALITY — best against active probing |
+| `vless-reality-grpc` | gRPC | REALITY |
+| `vless-reality-xhttp` | XHTTP | REALITY |
+| `vless-tls` | tcp (vision) | self-signed TLS |
+| `vless-tls-ws` | websocket | self-signed TLS |
+| `vless-tls-xhttp` | XHTTP | self-signed TLS |
+| `vless-tls-grpc` | gRPC | self-signed TLS |
+| `vless-tls-httpupgrade` | HTTPUpgrade | self-signed TLS |
+| `vmess-ws` | websocket | none (CDN-friendly) |
+| `vmess-tcp` | tcp | none |
+| `vmess-tls-ws` | websocket | self-signed TLS |
+| `trojan-tls` | tcp | self-signed TLS |
+| `trojan-tls-ws` | websocket | self-signed TLS |
+| `socks` | tcp (loopback) | none — local proxy |
 
 ---
 
@@ -196,6 +244,14 @@ One shared observatory (`subjectSelector: ["slot"]`) probes every member. Becaus
 `slotN-out-` tag **prefix**, the balancer and observatory adopt live-added members with no config
 reload — that's the zero-restart trick. A subscription refresh diffs the pool and applies the delta
 with `xray api ado/rmo`; only a change to the *set* of masters triggers a full config regen + restart.
+
+### Traffic accounting
+
+xray's stats API is always enabled (`policy.system.stats*` + per-user `levels.0.statsUser*`). The
+daemon samples the cumulative byte counters once a minute, diffs them (reset-safe across xray
+restarts), and stores hourly buckets + lifetime totals in sqlite — that feeds `emx traffic`, the
+per-user usage, and byte-cap enforcement. The gRPC api binds a loopback port starting at `11932`,
+**auto-advancing** if it's taken (so it never clashes with another xray on the same host).
 
 ### Paths (XDG)
 
@@ -232,9 +288,11 @@ EMX_E2E=1 go test ./daemon/ -run EndToEnd
 ### Layout
 
 ```
-cmd/emx/          cobra CLI, bubbletea TUI, gRPC client
-core/xray/        OS-agnostic: models, store, link parser, config Generate, dialer, keygen, templates
-daemon/           supervisor (Reconcile / SyncDialerMembers), watchdog, xray api, gRPC server, scheduler
+cmd/emx/          cobra CLI, bubbletea TUI, gRPC client (traffic/QR/backup/users views)
+core/xray/        OS-agnostic: models, store, link parser, config Generate, dialer, keygen, templates,
+                  traffic stats, multi-user
+daemon/           supervisor (Reconcile / SyncDialerMembers), watchdog, xray api, gRPC server,
+                  scheduler, traffic sampler, backup/user handlers
 api/              emx.proto + generated stubs
 internal/         paths (XDG), xraybin (go:embed)
 scripts/          fetch-xray.sh

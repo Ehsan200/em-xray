@@ -35,7 +35,7 @@ func Open(dsn string) (*Store, error) {
 			return nil, err
 		}
 	}
-	if err := db.AutoMigrate(&Subscription{}, &SubNode{}, &SubNodeOverride{}, &XrayEntry{}, &Inbound{}, &TrafficBucket{}, &TrafficTotal{}); err != nil {
+	if err := db.AutoMigrate(&Subscription{}, &SubNode{}, &SubNodeOverride{}, &XrayEntry{}, &Inbound{}, &InboundUser{}, &TrafficBucket{}, &TrafficTotal{}); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
@@ -347,6 +347,19 @@ func (s *Store) SubNamesExist(names []string) (missing []string) {
 
 func (s *Store) SetEntryEnabled(id uint, enabled bool) error {
 	return s.db.Model(&XrayEntry{}).Where("id = ?", id).Update("enabled", enabled).Error
+}
+
+// DeleteAllConfig wipes inbounds, entries, subscriptions and their volatile
+// nodes/overrides — used by a "replace" import. Traffic history is preserved.
+func (s *Store) DeleteAllConfig() error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for _, m := range []any{&Inbound{}, &XrayEntry{}, &Subscription{}, &SubNode{}, &SubNodeOverride{}} {
+			if err := tx.Where("1 = 1").Delete(m).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ---- Inbounds --------------------------------------------------------------

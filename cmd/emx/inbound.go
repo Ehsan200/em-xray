@@ -21,7 +21,7 @@ func inboundCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "in") },
 	}
 	c.AddCommand(inboundAddCmd(), inboundListCmd(), inboundRemoveCmd(),
-		inboundDuplicateCmd(), inboundEditCmd())
+		inboundDuplicateCmd(), inboundEditCmd(), inboundQRCmd(), inboundUserCmd())
 	return c
 }
 

@@ -52,6 +52,29 @@ func (s *Supervisor) Reconcile() error {
 }
 
 // reconcileLocked is Reconcile's body; callers must hold s.mu.
+// activeUsers returns an inbound's users that should currently have access:
+// enabled, and either uncapped or still under their lifetime byte cap.
+func (s *Supervisor) activeUsers(inboundID uint) []xray.InboundUser {
+	users, err := s.store.InboundUsers(inboundID)
+	if err != nil {
+		return nil
+	}
+	var out []xray.InboundUser
+	for _, u := range users {
+		if !u.Enabled {
+			continue
+		}
+		if u.ByteCap > 0 {
+			up, down := s.store.TrafficTotalFor(xray.KindUser, u.Email)
+			if up+down >= u.ByteCap {
+				continue // over quota → deny
+			}
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
 func (s *Supervisor) reconcileLocked() error {
 	entries, err := s.store.ListEntries()
 	if err != nil {
@@ -66,6 +89,11 @@ func (s *Supervisor) reconcileLocked() error {
 		if err := s.store.UpdateInbound(&inbounds[i]); err != nil {
 			return err
 		}
+	}
+	// Attach each inbound's active users (enabled + under byte cap) so Generate
+	// emits their clients. Over-quota users are dropped → access denied.
+	for i := range inbounds {
+		inbounds[i].Users = s.activeUsers(inbounds[i].ID)
 	}
 
 	slots, err := s.resolveDialerSlots(entries)

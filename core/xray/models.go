@@ -145,6 +145,27 @@ type Inbound struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+
+	// Users are extra clients sharing this listener (multi-tenant). Not a DB
+	// column — the daemon loads them from InboundUser and populates this before
+	// config generation. The inbound's own UUID/Password is the primary client.
+	Users []InboundUser `gorm:"-" json:"Users,omitempty"`
+}
+
+// InboundUser is an additional client on an inbound: its own credential, a stable
+// stats email, and an optional byte cap. When lifetime usage reaches ByteCap the
+// daemon stops emitting the client (an over-quota user is denied access).
+type InboundUser struct {
+	ID        uint   `gorm:"primaryKey"`
+	InboundID uint   `gorm:"index:idx_user_inbound,unique,priority:1;not null"`
+	Name      string `gorm:"index:idx_user_inbound,unique,priority:2;not null"`
+	UUID      string // vless/vmess
+	Password  string // trojan
+	Email     string `gorm:"index;not null"` // stats tag: user>>>EMAIL>>>traffic>>>...
+	ByteCap   int64  // 0 = unlimited; else deny once up+down reaches it
+	Enabled   bool   `gorm:"default:true"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Target kinds for an inbound's egress.
