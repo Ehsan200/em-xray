@@ -23,8 +23,68 @@ func subCmd() *cobra.Command {
 		subEnableCmd(true), subEnableCmd(false),
 		subRefreshCmd(), subNodesCmd(),
 		subNodeDisableCmd(true), subNodeDisableCmd(false),
-		subRenameCmd(), subInfoCmd(),
+		subRenameCmd(), subInfoCmd(), subSetCmd(),
 	)
+	return c
+}
+
+// subSetCmd changes refresh interval / node cap / UA on an existing subscription.
+// Unspecified flags keep their current value.
+func subSetCmd() *cobra.Command {
+	var interval, cap int
+	var ua string
+	c := &cobra.Command{
+		Use: "set <id>", Short: "change a subscription's refresh interval / cap / user-agent",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			f := cmd.Flags()
+			if !f.Changed("interval") && !f.Changed("cap") && !f.Changed("ua") {
+				return fmt.Errorf("nothing to change: pass --interval, --cap and/or --ua")
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				// Start from current values so unspecified flags are preserved.
+				list, err := cl.SubList(ctx, &emxv1.Empty{})
+				if err != nil {
+					return err
+				}
+				var cur *emxv1.SubInfo
+				for _, s := range list.Subs {
+					if s.Id == id {
+						cur = s
+						break
+					}
+				}
+				if cur == nil {
+					return fmt.Errorf("no subscription with id %d", id)
+				}
+				req := &emxv1.SubOptionsRequest{
+					Id: id, IntervalSec: cur.IntervalSec, NodeCap: cur.NodeCap, UserAgent: cur.UserAgent,
+				}
+				if f.Changed("interval") {
+					req.IntervalSec = int32(interval)
+				}
+				if f.Changed("cap") {
+					req.NodeCap = int32(cap)
+				}
+				if f.Changed("ua") {
+					req.UserAgent = ua
+				}
+				reply, err := cl.SubSetOptions(ctx, req)
+				if err != nil {
+					return err
+				}
+				printSubInfo(cmd, reply.Sub)
+				return nil
+			})
+		},
+	}
+	c.Flags().IntVar(&interval, "interval", 0, "refresh interval seconds (0 = 12h default)")
+	c.Flags().IntVar(&cap, "cap", 0, "max active nodes (0 = 30 default)")
+	c.Flags().StringVar(&ua, "ua", "", "User-Agent ('' = v2rayN default)")
 	return c
 }
 
@@ -54,22 +114,7 @@ func subInfoCmd() *cobra.Command {
 }
 
 func printSubInfo(cmd *cobra.Command, s *emxv1.SubInfo) {
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "Name\t%s\n", s.Name)
-	fmt.Fprintf(tw, "ID\t%d\n", s.Id)
-	fmt.Fprintf(tw, "URL\t%s\n", s.Url)
-	fmt.Fprintf(tw, "Enabled\t%v\n", s.Enabled)
-	fmt.Fprintf(tw, "Nodes\t%d (%d active)\n", s.NodeCount, s.ActiveCount)
-	fmt.Fprintf(tw, "Traffic\t%s\n", trafficLine(s))
-	fmt.Fprintf(tw, "Expires\t%s\n", expiryLine(s.Expire))
-	fmt.Fprintf(tw, "Last fetch\t%s\n", fetchLine(s.LastFetched))
-	fmt.Fprintf(tw, "User-Agent\t%s\n", orDash(s.UserAgent))
-	fmt.Fprintf(tw, "Interval\t%s\n", intervalLine(s.IntervalSec))
-	fmt.Fprintf(tw, "Node cap\t%s\n", capLine(s.NodeCap))
-	if s.LastError != "" {
-		fmt.Fprintf(tw, "Last error\t%s\n", s.LastError)
-	}
-	tw.Flush()
+	fmt.Fprintln(cmd.OutOrStdout(), renderSubCard(s))
 }
 
 func subRenameCmd() *cobra.Command {
@@ -210,7 +255,7 @@ func subRefreshCmd() *cobra.Command {
 				if id == 0 {
 					fmt.Fprintln(cmd.OutOrStdout(), "refreshed all")
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "refreshed: %d nodes\n", reply.Nodes)
+					fmt.Fprintf(cmd.OutOrStdout(), "refreshed: %d nodes %s\n", reply.Nodes, changeSummary(reply.Added, reply.Removed))
 				}
 				return nil
 			})
@@ -295,6 +340,7 @@ func withClientTimeout(cmd *cobra.Command, d time.Duration, fn func(context.Cont
 	defer conn.Close()
 	return fn(ctx, client)
 }
+
 // ---- subscription metadata formatting -------------------------------------
 
 // humanBytes renders a byte count as a compact human string (e.g. 1.5 GB).
@@ -312,20 +358,6 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
-// trafficLine shows up/down and used-of-total (with percent) when a quota exists.
-func trafficLine(s *emxv1.SubInfo) string {
-	used := s.Upload + s.Download
-	base := fmt.Sprintf("↑%s ↓%s", humanBytes(s.Upload), humanBytes(s.Download))
-	if s.Total > 0 {
-		pct := float64(used) / float64(s.Total) * 100
-		return fmt.Sprintf("%s · %s / %s (%.1f%%)", base, humanBytes(used), humanBytes(s.Total), pct)
-	}
-	if used > 0 {
-		return fmt.Sprintf("%s · %s used", base, humanBytes(used))
-	}
-	return base
 }
 
 // usedLine is the compact used/total for the ls table.
@@ -373,9 +405,22 @@ func fetchLine(last int64) string {
 
 func intervalLine(sec int32) string {
 	if sec <= 0 {
-		return "12h0m0s (default)"
+		return "12h (default)"
 	}
-	return (time.Duration(sec) * time.Second).String()
+	return compactDur(time.Duration(sec) * time.Second)
+}
+
+// compactDur formats a duration on whole-unit boundaries (12h, 30m) and falls
+// back to the standard form otherwise.
+func compactDur(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	case d >= time.Minute && d%time.Minute == 0:
+		return fmt.Sprintf("%dm", d/time.Minute)
+	default:
+		return d.String()
+	}
 }
 
 func capLine(cap int32) string {
@@ -385,24 +430,30 @@ func capLine(cap int32) string {
 	return strconv.Itoa(int(cap))
 }
 
-// subMetaText renders a subscription's metadata as a multi-line block (for the
-// TUI, which prints it above the menu).
+// subMetaText renders a subscription's metadata card (for the TUI, which prints
+// it above the menu).
 func subMetaText(s *emxv1.SubInfo) string {
-	lines := []string{
-		fmt.Sprintf("Subscription: %s (id %d)", s.Name, s.Id),
-		"  URL:        " + s.Url,
-		fmt.Sprintf("  Nodes:      %d (%d active)", s.NodeCount, s.ActiveCount),
-		"  Traffic:    " + trafficLine(s),
-		"  Expires:    " + expiryLine(s.Expire),
-		"  Last fetch: " + fetchLine(s.LastFetched),
-		"  User-Agent: " + orDash(s.UserAgent),
-		"  Interval:   " + intervalLine(s.IntervalSec),
-		"  Node cap:   " + capLine(s.NodeCap),
+	return renderSubCard(s)
+}
+
+// changeSummary describes a refresh's node diff: "(no change)" or "(+A -R)".
+func changeSummary(added, removed int32) string {
+	if added == 0 && removed == 0 {
+		return cardLabel.Render("(no change)")
 	}
-	if s.LastError != "" {
-		lines = append(lines, "  Last error: "+s.LastError)
+	parts := []string{}
+	if added > 0 {
+		parts = append(parts, goodStyle.Render(fmt.Sprintf("+%d", added)))
 	}
-	return strings.Join(lines, "\n")
+	if removed > 0 {
+		parts = append(parts, badStyle.Render(fmt.Sprintf("-%d", removed)))
+	}
+	return "(" + strings.Join(parts, " ") + " updated)"
+}
+
+// daysLeft returns whole days until the given unix expiry (may be negative).
+func daysLeft(expire int64) int {
+	return int(time.Until(time.Unix(expire, 0)).Hours() / 24)
 }
 
 func orDash(s string) string {

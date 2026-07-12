@@ -43,6 +43,15 @@ service Daemon {
   rpc SubNodes(IdRequest) returns (SubNodesReply);
   rpc SubSetNodeDisabled(SubNodeDisabledRequest) returns (Empty);
   rpc SubRename(RenameRequest) returns (Empty);
+  rpc SubSetOptions(SubOptionsRequest) returns (SubReply);
+}
+
+// SubOptionsRequest changes a subscription's refresh cadence / cap / UA.
+message SubOptionsRequest {
+  uint32 id = 1;
+  int32 interval_sec = 2; // 0 => 12h default
+  int32 node_cap = 3;     // 0 => 30 default
+  string user_agent = 4;  // "" => v2rayN default
 }
 
 message RenameRequest {
@@ -90,7 +99,11 @@ message SubReply { SubInfo sub = 1; }
 message SubListReply { repeated SubInfo subs = 1; }
 
 message SubRefreshRequest { uint32 id = 1; } // 0 => all enabled
-message SubRefreshReply { int32 nodes = 1; }
+message SubRefreshReply {
+  int32 nodes = 1;
+  int32 added = 2;   // nodes present now but not before
+  int32 removed = 3; // nodes present before but not now
+}
 
 message NodeInfo {
   string fingerprint = 1;

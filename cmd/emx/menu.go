@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
@@ -294,12 +296,13 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			{"View metadata", ""},
 			{"View / toggle nodes", ""},
 			{"Refresh now", ""},
+			{"Refresh interval / cap", ""},
 			{toggle, ""},
 			{"Rename", ""},
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 6 {
+		if !ok || i == 7 {
 			return
 		}
 		switch i {
@@ -314,10 +317,14 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			cancel()
 			if err != nil {
 				notify("error: %v", err)
+			} else if r.Added == 0 && r.Removed == 0 {
+				notify("refreshed: %d nodes (no change)", r.Nodes)
 			} else {
-				notify("refreshed: %d nodes", r.Nodes)
+				notify("refreshed: %d nodes (+%d -%d)", r.Nodes, r.Added, r.Removed)
 			}
 		case 3:
+			s.subSetOptions(sub)
+		case 4:
 			ctx, cancel := call()
 			_, err := s.c.SubSetEnabled(ctx, &emxv1.SetEnabledRequest{Id: sub.Id, Enabled: !sub.Enabled})
 			cancel()
@@ -326,7 +333,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				sub.Enabled = !sub.Enabled
 			}
-		case 4:
+		case 5:
 			name, ok := runInput("New name", sub.Name)
 			if !ok || name == "" || name == sub.Name {
 				break
@@ -340,7 +347,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 				notify("renamed to %s", name)
 				sub.Name = name
 			}
-		case 5:
+		case 6:
 			if confirm("Remove subscription " + sub.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.SubRemove(ctx, &emxv1.IdRequest{Id: sub.Id})
@@ -354,6 +361,39 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			}
 		}
 	}
+}
+
+// subSetOptions prompts for a new refresh interval and node cap and applies them.
+func (s *menuSession) subSetOptions(sub *emxv1.SubInfo) {
+	ivInput, ok := runInput("Refresh interval seconds (0 = 12h default)", strconv.Itoa(int(sub.IntervalSec)))
+	if !ok {
+		return
+	}
+	iv, err := strconv.Atoi(strings.TrimSpace(ivInput))
+	if err != nil || iv < 0 {
+		notify("bad interval %q", ivInput)
+		return
+	}
+	capInput, ok := runInput("Max active nodes (0 = 30 default)", strconv.Itoa(int(sub.NodeCap)))
+	if !ok {
+		return
+	}
+	cap, err := strconv.Atoi(strings.TrimSpace(capInput))
+	if err != nil || cap < 0 {
+		notify("bad cap %q", capInput)
+		return
+	}
+	ctx, cancel := call()
+	reply, err := s.c.SubSetOptions(ctx, &emxv1.SubOptionsRequest{
+		Id: sub.Id, IntervalSec: int32(iv), NodeCap: int32(cap), UserAgent: sub.UserAgent,
+	})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	sub.IntervalSec, sub.NodeCap = reply.Sub.IntervalSec, reply.Sub.NodeCap
+	notify("updated: interval %s, cap %s", intervalLine(sub.IntervalSec), capLine(sub.NodeCap))
 }
 
 func (s *menuSession) nodesMenu(sub *emxv1.SubInfo) {

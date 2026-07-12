@@ -56,11 +56,29 @@ func (s *Server) SubRefresh(ctx context.Context, req *emxv1.SubRefreshRequest) (
 	if req.Id == 0 {
 		return &emxv1.SubRefreshReply{}, s.fetcher.RefreshAll(ctx)
 	}
-	n, err := s.fetcher.RefreshOne(ctx, uint(req.Id))
+	r, err := s.fetcher.RefreshOne(ctx, uint(req.Id))
 	if err != nil {
 		return nil, err
 	}
-	return &emxv1.SubRefreshReply{Nodes: int32(n)}, nil
+	return &emxv1.SubRefreshReply{Nodes: int32(r.Nodes), Added: int32(r.Added), Removed: int32(r.Removed)}, nil
+}
+
+// SubSetOptions changes a subscription's refresh interval, node cap and UA. The
+// scheduler picks up the new interval on its next tick (IsDue re-reads it).
+func (s *Server) SubSetOptions(ctx context.Context, req *emxv1.SubOptionsRequest) (*emxv1.SubReply, error) {
+	sub, err := s.store.GetSubscription(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	sub.IntervalSec = int(req.IntervalSec)
+	sub.NodeCap = int(req.NodeCap)
+	sub.UserAgent = req.UserAgent
+	if err := s.store.UpdateSubscription(sub); err != nil {
+		return nil, err
+	}
+	// A smaller cap can change which nodes are active → live-sync the pool.
+	s.sup.SyncDialerMembers()
+	return &emxv1.SubReply{Sub: s.subInfo(*sub)}, nil
 }
 
 func (s *Server) SubNodes(ctx context.Context, req *emxv1.IdRequest) (*emxv1.SubNodesReply, error) {

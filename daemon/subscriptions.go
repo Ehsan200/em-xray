@@ -61,10 +61,10 @@ func (f *SubFetcher) RefreshDue(ctx context.Context) {
 		if !xray.IsDue(subs[i], now) {
 			continue
 		}
-		if n, err := f.refresh(ctx, &subs[i]); err != nil {
+		if r, err := f.refresh(ctx, &subs[i]); err != nil {
 			f.log.Printf("sub %q: refresh failed: %v", subs[i].Name, err)
 		} else {
-			f.log.Printf("sub %q: %d nodes", subs[i].Name, n)
+			f.log.Printf("sub %q: %d nodes (+%d -%d)", subs[i].Name, r.Nodes, r.Added, r.Removed)
 			changed = true
 		}
 	}
@@ -97,39 +97,77 @@ func (f *SubFetcher) RefreshAll(ctx context.Context) error {
 }
 
 // RefreshOne force-refreshes a single subscription by id (manual refresh-one).
-func (f *SubFetcher) RefreshOne(ctx context.Context, id uint) (int, error) {
+func (f *SubFetcher) RefreshOne(ctx context.Context, id uint) (RefreshResult, error) {
 	sub, err := f.store.GetSubscription(id)
 	if err != nil {
-		return 0, err
+		return RefreshResult{}, err
 	}
-	n, err := f.refresh(ctx, sub)
+	r, err := f.refresh(ctx, sub)
 	if err != nil {
-		return 0, err
+		return RefreshResult{}, err
 	}
 	f.fireChange()
-	return n, nil
+	return r, nil
 }
+
+// RefreshResult summarises what a refresh changed: the new node count and how
+// many nodes appeared (Added) or disappeared (Removed) versus the prior pool.
+type RefreshResult struct {
+	Nodes   int
+	Added   int
+	Removed int
+}
+
+// Changed reports whether the node set actually differs from before.
+func (r RefreshResult) Changed() bool { return r.Added > 0 || r.Removed > 0 }
 
 // refresh does the fetch → parse → ReplaceNodes for one subscription and records
 // the outcome (LastFetched/LastError, and quota when the header was present).
-// Returns the node count on success.
-func (f *SubFetcher) refresh(ctx context.Context, sub *xray.Subscription) (int, error) {
+// Returns a diff of the node pool on success.
+func (f *SubFetcher) refresh(ctx context.Context, sub *xray.Subscription) (RefreshResult, error) {
 	body, quota, err := xray.FetchSubscriptionBody(ctx, f.client, sub.URL, sub.UserAgent)
 	if err != nil {
 		f.record(sub, quota, err)
-		return 0, err
+		return RefreshResult{}, err
 	}
 	nodes, err := xray.ParseSubscriptionBody(sub.Name, body)
 	if err != nil {
 		f.record(sub, quota, err)
-		return 0, err
+		return RefreshResult{}, err
+	}
+	// Diff by content fingerprint against the pool we're about to replace.
+	before := f.fingerprints(sub.ID)
+	after := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		after[n.Fingerprint] = true
+	}
+	res := RefreshResult{Nodes: len(nodes)}
+	for fp := range after {
+		if !before[fp] {
+			res.Added++
+		}
+	}
+	for fp := range before {
+		if !after[fp] {
+			res.Removed++
+		}
 	}
 	if err := f.store.ReplaceNodes(sub.ID, nodes); err != nil {
 		f.record(sub, quota, err)
-		return 0, err
+		return RefreshResult{}, err
 	}
 	f.record(sub, quota, nil)
-	return len(nodes), nil
+	return res, nil
+}
+
+// fingerprints returns the set of current node fingerprints for a subscription.
+func (f *SubFetcher) fingerprints(subID uint) map[string]bool {
+	nodes, _ := f.store.NodesForSub(subID)
+	set := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		set[n.Fingerprint] = true
+	}
+	return set
 }
 
 // record persists fetch outcome + quota. Quota is only applied when present, so
