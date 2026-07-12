@@ -52,7 +52,7 @@ emx version
 One-liner for the latest linux/amd64 build:
 
 ```bash
-curl -sL https://api.github.com/repos/gravisun/em-xray/releases/latest \
+curl -sL https://api.github.com/repos/Ehsan200/em-xray/releases/latest \
   | grep -o 'https://[^"]*linux-amd64\.tar\.gz' \
   | xargs curl -L | tar -xz
 ```
