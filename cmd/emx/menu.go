@@ -680,7 +680,7 @@ func (s *menuSession) entryAdd() {
 	if !ok || name == "" {
 		return
 	}
-	link, ok := runInput("Share link (vless/vmess/trojan/ss)", "")
+	link, ok := runInput("Share link (vless/vmess/trojan/ss/hysteria2)", "")
 	if !ok || link == "" {
 		return
 	}

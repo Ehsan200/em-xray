@@ -16,7 +16,7 @@ type ParsedLink struct {
 	Outbound json.RawMessage
 }
 
-// ParseLink parses a vless/vmess/trojan/ss share link into an xray outbound.
+// ParseLink parses a vless/vmess/trojan/ss/hysteria2 share link into an xray outbound.
 func ParseLink(link string) (*ParsedLink, error) {
 	link = strings.TrimSpace(link)
 	scheme, _, ok := strings.Cut(link, "://")
@@ -32,6 +32,8 @@ func ParseLink(link string) (*ParsedLink, error) {
 		return parseTrojan(link)
 	case "ss":
 		return parseSS(link)
+	case "hysteria2", "hy2":
+		return parseHysteria2(link)
 	default:
 		return nil, fmt.Errorf("unsupported scheme %q", scheme)
 	}
@@ -104,6 +106,52 @@ func parseTrojan(link string) (*ParsedLink, error) {
 		applyTLS(stream, q, host)
 	}
 	ob, err := outbound("trojan", settings, stream)
+	if err != nil {
+		return nil, err
+	}
+	return &ParsedLink{Name: fragmentName(u, host), Outbound: ob}, nil
+}
+
+// ---- hysteria2 -------------------------------------------------------------
+
+// parseHysteria2 parses a hysteria2://auth@host:port/?insecure=1&sni=... link
+// into an xray hysteria outbound. Auth lives in streamSettings.hysteriaSettings;
+// the protocol settings carry only the server endpoint. obfs is unsupported by
+// xray's hysteria transport and is ignored. hysteria2 always runs over TLS.
+func parseHysteria2(link string) (*ParsedLink, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil, err
+	}
+	host, port, err := hostPort(u)
+	if err != nil {
+		return nil, err
+	}
+	auth := u.User.Username()
+	if pw, ok := u.User.Password(); ok && pw != "" {
+		auth += ":" + pw
+	}
+	if auth == "" {
+		return nil, fmt.Errorf("hysteria2: missing auth")
+	}
+	q := u.Query()
+
+	settings := map[string]any{"version": 2, "address": host, "port": port}
+
+	tls := map[string]any{}
+	if sni := q.Get("sni"); sni != "" {
+		tls["serverName"] = sni
+	}
+	if q.Get("insecure") == "1" || strings.EqualFold(q.Get("insecure"), "true") {
+		tls["allowInsecure"] = true
+	}
+	stream := map[string]any{
+		"network":          "hysteria",
+		"security":         "tls",
+		"tlsSettings":      tls,
+		"hysteriaSettings": map[string]any{"version": 2, "auth": auth},
+	}
+	ob, err := outbound("hysteria", settings, stream)
 	if err != nil {
 		return nil, err
 	}

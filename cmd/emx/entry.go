@@ -136,7 +136,7 @@ func entryAddCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&link, "link", "", "vless/vmess/trojan/ss share link")
+	c.Flags().StringVar(&link, "link", "", "vless/vmess/trojan/ss/hysteria2 share link")
 	c.Flags().StringVar(&outbound, "outbound", "", "raw outbound JSON")
 	c.Flags().StringVar(&dialer, "dialer", "", "dialer refs (xray:N,xraysub:N,proxy:N) — makes a master")
 	return c
