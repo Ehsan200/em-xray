@@ -33,6 +33,32 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
 
 ## Install
 
+### Download a release
+
+Prebuilt binaries for linux/macOS × amd64/arm64 are attached to each GitHub release.
+The xray binary + geo data are bundled inside the archive — nothing else to fetch.
+
+```bash
+VERSION=v1.0.0                       # pick a tag from the releases page
+OS=linux                             # linux | darwin
+ARCH=amd64                           # amd64 | arm64
+
+curl -LO "https://github.com/gravisun/em-xray/releases/download/$VERSION/emx-$VERSION-$OS-$ARCH.tar.gz"
+tar -xzf "emx-$VERSION-$OS-$ARCH.tar.gz"          # extracts emx-$OS-$ARCH/
+sudo install "emx-$OS-$ARCH/emx" /usr/local/bin/emx
+emx version
+```
+
+One-liner for the latest linux/amd64 build:
+
+```bash
+curl -sL https://api.github.com/repos/gravisun/em-xray/releases/latest \
+  | grep -o 'https://[^"]*linux-amd64\.tar\.gz' \
+  | xargs curl -L | tar -xz
+```
+
+### Build from source
+
 Requires Go 1.26+. The xray binary is fetched at build time (it is not committed).
 
 ```bash
@@ -46,8 +72,6 @@ Cross-target builds fetch the matching xray triple, e.g. for local macOS testing
 ```bash
 make fetch-xray TARGET=macos-arm64-v8a
 ```
-
-Prebuilt binaries for linux/macOS × amd64/arm64 are attached to each GitHub release.
 
 ---
 
