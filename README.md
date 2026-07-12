@@ -43,7 +43,7 @@ VERSION=v1.0.0                       # pick a tag from the releases page
 OS=linux                             # linux | darwin
 ARCH=amd64                           # amd64 | arm64
 
-curl -LO "https://github.com/gravisun/em-xray/releases/download/$VERSION/emx-$VERSION-$OS-$ARCH.tar.gz"
+curl -LO "https://github.com/Ehsan200/em-xray/releases/download/$VERSION/emx-$VERSION-$OS-$ARCH.tar.gz"
 tar -xzf "emx-$VERSION-$OS-$ARCH.tar.gz"          # extracts emx-$OS-$ARCH/
 sudo install "emx-$OS-$ARCH/emx" /usr/local/bin/emx
 emx version
