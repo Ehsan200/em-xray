@@ -191,3 +191,9 @@ api/              emx.proto + generated stubs
 internal/         paths (XDG), xraybin (go:embed)
 scripts/          fetch-xray.sh
 ```
+
+---
+
+## License
+
+[MIT](LICENSE)
