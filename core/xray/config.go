@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // GenOptions carries the OS-specific bits Generate needs (log paths), keeping
@@ -270,7 +271,20 @@ func buildInboundStream(in Inbound) (map[string]any, error) {
 			"shortIds":    []any{in.RealityShortID},
 		}
 	case "tls":
-		ss["security"] = "tls" // caller must supply certs; left minimal for now
+		if in.TLSCert == "" || in.TLSKey == "" {
+			return nil, fmt.Errorf("tls selected but no certificate")
+		}
+		ss["security"] = "tls"
+		tls := map[string]any{
+			"certificates": []any{map[string]any{
+				"certificate": pemLines(in.TLSCert),
+				"key":         pemLines(in.TLSKey),
+			}},
+		}
+		if in.TLSSNI != "" {
+			tls["serverName"] = in.TLSSNI
+		}
+		ss["tlsSettings"] = tls
 	case "", "none":
 		// plain
 	}
@@ -282,10 +296,32 @@ func buildInboundStream(in Inbound) (map[string]any, error) {
 			ws["headers"] = map[string]any{"Host": in.Host}
 		}
 		ss["wsSettings"] = ws
+	case "httpupgrade":
+		hu := map[string]any{"path": orDefault(in.Path, "/")}
+		if in.Host != "" {
+			hu["host"] = in.Host
+		}
+		ss["httpupgradeSettings"] = hu
+	case "xhttp":
+		x := map[string]any{"path": orDefault(in.Path, "/"), "mode": "auto"}
+		if in.Host != "" {
+			x["host"] = in.Host
+		}
+		ss["xhttpSettings"] = x
 	case "grpc":
 		ss["grpcSettings"] = map[string]any{"serviceName": in.Path}
 	}
 	return ss, nil
+}
+
+// pemLines splits a PEM blob into its lines (no trailing empties) for xray's
+// tlsSettings.certificates, which take certificate/key as string arrays.
+func pemLines(pem string) []any {
+	out := []any{}
+	for _, ln := range strings.Split(strings.TrimRight(pem, "\n"), "\n") {
+		out = append(out, ln)
+	}
+	return out
 }
 
 // entryOutbound unmarshals a stored outbound, forces its tag, and heals a

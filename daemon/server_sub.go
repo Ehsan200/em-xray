@@ -3,8 +3,8 @@ package daemon
 import (
 	"context"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
-	"github.com/gravisun/em-xray/core/xray"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/core/xray"
 )
 
 func (s *Server) SubAdd(ctx context.Context, req *emxv1.SubAddRequest) (*emxv1.SubReply, error) {
@@ -101,9 +101,15 @@ func (s *Server) SubRename(ctx context.Context, req *emxv1.RenameRequest) (*emxv
 func (s *Server) subInfo(sub xray.Subscription) *emxv1.SubInfo {
 	nodes, _ := s.store.NodesForSub(sub.ID)
 	active, _ := s.store.ActiveNodes(sub.ID)
+	var lastFetched int64
+	if !sub.LastFetched.IsZero() {
+		lastFetched = sub.LastFetched.Unix()
+	}
 	return &emxv1.SubInfo{
 		Id: uint32(sub.ID), Name: sub.Name, Url: sub.URL, Enabled: sub.Enabled,
 		NodeCount: int32(len(nodes)), ActiveCount: int32(len(active)), LastError: sub.LastError,
 		Upload: sub.Upload, Download: sub.Download, Total: sub.Total, Expire: sub.Expire,
+		LastFetched: lastFetched, UserAgent: sub.UserAgent,
+		IntervalSec: int32(sub.IntervalSec), NodeCap: int32(sub.NodeCap),
 	}
 }

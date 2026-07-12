@@ -27,9 +27,15 @@ const (
 	Daemon_EntryList_FullMethodName          = "/emx.v1.Daemon/EntryList"
 	Daemon_EntryRemove_FullMethodName        = "/emx.v1.Daemon/EntryRemove"
 	Daemon_EntryRename_FullMethodName        = "/emx.v1.Daemon/EntryRename"
+	Daemon_EntryDuplicate_FullMethodName     = "/emx.v1.Daemon/EntryDuplicate"
+	Daemon_EntryGetConfig_FullMethodName     = "/emx.v1.Daemon/EntryGetConfig"
+	Daemon_EntrySetConfig_FullMethodName     = "/emx.v1.Daemon/EntrySetConfig"
 	Daemon_InboundAdd_FullMethodName         = "/emx.v1.Daemon/InboundAdd"
 	Daemon_InboundList_FullMethodName        = "/emx.v1.Daemon/InboundList"
 	Daemon_InboundRemove_FullMethodName      = "/emx.v1.Daemon/InboundRemove"
+	Daemon_InboundDuplicate_FullMethodName   = "/emx.v1.Daemon/InboundDuplicate"
+	Daemon_InboundGetConfig_FullMethodName   = "/emx.v1.Daemon/InboundGetConfig"
+	Daemon_InboundSetConfig_FullMethodName   = "/emx.v1.Daemon/InboundSetConfig"
 	Daemon_Winners_FullMethodName            = "/emx.v1.Daemon/Winners"
 	Daemon_SubAdd_FullMethodName             = "/emx.v1.Daemon/SubAdd"
 	Daemon_SubList_FullMethodName            = "/emx.v1.Daemon/SubList"
@@ -58,10 +64,16 @@ type DaemonClient interface {
 	EntryList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*EntryListReply, error)
 	EntryRemove(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*Empty, error)
 	EntryRename(ctx context.Context, in *RenameRequest, opts ...grpc.CallOption) (*Empty, error)
+	EntryDuplicate(ctx context.Context, in *DuplicateRequest, opts ...grpc.CallOption) (*EntryReply, error)
+	EntryGetConfig(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*ConfigReply, error)
+	EntrySetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*EntryReply, error)
 	// Inbounds (server listeners routed to a target).
 	InboundAdd(ctx context.Context, in *InboundAddRequest, opts ...grpc.CallOption) (*InboundReply, error)
 	InboundList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*InboundListReply, error)
 	InboundRemove(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*Empty, error)
+	InboundDuplicate(ctx context.Context, in *DuplicateRequest, opts ...grpc.CallOption) (*InboundReply, error)
+	InboundGetConfig(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*ConfigReply, error)
+	InboundSetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*InboundReply, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WinnersReply, error)
 	// Subscriptions (node pools consumed by masters via xraysub:NAME).
@@ -163,6 +175,36 @@ func (c *daemonClient) EntryRename(ctx context.Context, in *RenameRequest, opts 
 	return out, nil
 }
 
+func (c *daemonClient) EntryDuplicate(ctx context.Context, in *DuplicateRequest, opts ...grpc.CallOption) (*EntryReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EntryReply)
+	err := c.cc.Invoke(ctx, Daemon_EntryDuplicate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) EntryGetConfig(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*ConfigReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigReply)
+	err := c.cc.Invoke(ctx, Daemon_EntryGetConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) EntrySetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*EntryReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EntryReply)
+	err := c.cc.Invoke(ctx, Daemon_EntrySetConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) InboundAdd(ctx context.Context, in *InboundAddRequest, opts ...grpc.CallOption) (*InboundReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InboundReply)
@@ -187,6 +229,36 @@ func (c *daemonClient) InboundRemove(ctx context.Context, in *IdRequest, opts ..
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Empty)
 	err := c.cc.Invoke(ctx, Daemon_InboundRemove_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) InboundDuplicate(ctx context.Context, in *DuplicateRequest, opts ...grpc.CallOption) (*InboundReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InboundReply)
+	err := c.cc.Invoke(ctx, Daemon_InboundDuplicate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) InboundGetConfig(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*ConfigReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigReply)
+	err := c.cc.Invoke(ctx, Daemon_InboundGetConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) InboundSetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*InboundReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InboundReply)
+	err := c.cc.Invoke(ctx, Daemon_InboundSetConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -300,10 +372,16 @@ type DaemonServer interface {
 	EntryList(context.Context, *Empty) (*EntryListReply, error)
 	EntryRemove(context.Context, *IdRequest) (*Empty, error)
 	EntryRename(context.Context, *RenameRequest) (*Empty, error)
+	EntryDuplicate(context.Context, *DuplicateRequest) (*EntryReply, error)
+	EntryGetConfig(context.Context, *IdRequest) (*ConfigReply, error)
+	EntrySetConfig(context.Context, *SetConfigRequest) (*EntryReply, error)
 	// Inbounds (server listeners routed to a target).
 	InboundAdd(context.Context, *InboundAddRequest) (*InboundReply, error)
 	InboundList(context.Context, *Empty) (*InboundListReply, error)
 	InboundRemove(context.Context, *IdRequest) (*Empty, error)
+	InboundDuplicate(context.Context, *DuplicateRequest) (*InboundReply, error)
+	InboundGetConfig(context.Context, *IdRequest) (*ConfigReply, error)
+	InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(context.Context, *Empty) (*WinnersReply, error)
 	// Subscriptions (node pools consumed by masters via xraysub:NAME).
@@ -349,6 +427,15 @@ func (UnimplementedDaemonServer) EntryRemove(context.Context, *IdRequest) (*Empt
 func (UnimplementedDaemonServer) EntryRename(context.Context, *RenameRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EntryRename not implemented")
 }
+func (UnimplementedDaemonServer) EntryDuplicate(context.Context, *DuplicateRequest) (*EntryReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EntryDuplicate not implemented")
+}
+func (UnimplementedDaemonServer) EntryGetConfig(context.Context, *IdRequest) (*ConfigReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EntryGetConfig not implemented")
+}
+func (UnimplementedDaemonServer) EntrySetConfig(context.Context, *SetConfigRequest) (*EntryReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EntrySetConfig not implemented")
+}
 func (UnimplementedDaemonServer) InboundAdd(context.Context, *InboundAddRequest) (*InboundReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InboundAdd not implemented")
 }
@@ -357,6 +444,15 @@ func (UnimplementedDaemonServer) InboundList(context.Context, *Empty) (*InboundL
 }
 func (UnimplementedDaemonServer) InboundRemove(context.Context, *IdRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InboundRemove not implemented")
+}
+func (UnimplementedDaemonServer) InboundDuplicate(context.Context, *DuplicateRequest) (*InboundReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundDuplicate not implemented")
+}
+func (UnimplementedDaemonServer) InboundGetConfig(context.Context, *IdRequest) (*ConfigReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundGetConfig not implemented")
+}
+func (UnimplementedDaemonServer) InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InboundSetConfig not implemented")
 }
 func (UnimplementedDaemonServer) Winners(context.Context, *Empty) (*WinnersReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Winners not implemented")
@@ -550,6 +646,60 @@ func _Daemon_EntryRename_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_EntryDuplicate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DuplicateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).EntryDuplicate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_EntryDuplicate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).EntryDuplicate(ctx, req.(*DuplicateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_EntryGetConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IdRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).EntryGetConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_EntryGetConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).EntryGetConfig(ctx, req.(*IdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_EntrySetConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).EntrySetConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_EntrySetConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).EntrySetConfig(ctx, req.(*SetConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_InboundAdd_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InboundAddRequest)
 	if err := dec(in); err != nil {
@@ -600,6 +750,60 @@ func _Daemon_InboundRemove_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).InboundRemove(ctx, req.(*IdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_InboundDuplicate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DuplicateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundDuplicate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundDuplicate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundDuplicate(ctx, req.(*DuplicateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_InboundGetConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IdRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundGetConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundGetConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundGetConfig(ctx, req.(*IdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_InboundSetConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundSetConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundSetConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundSetConfig(ctx, req.(*SetConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -806,6 +1010,18 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_EntryRename_Handler,
 		},
 		{
+			MethodName: "EntryDuplicate",
+			Handler:    _Daemon_EntryDuplicate_Handler,
+		},
+		{
+			MethodName: "EntryGetConfig",
+			Handler:    _Daemon_EntryGetConfig_Handler,
+		},
+		{
+			MethodName: "EntrySetConfig",
+			Handler:    _Daemon_EntrySetConfig_Handler,
+		},
+		{
 			MethodName: "InboundAdd",
 			Handler:    _Daemon_InboundAdd_Handler,
 		},
@@ -816,6 +1032,18 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InboundRemove",
 			Handler:    _Daemon_InboundRemove_Handler,
+		},
+		{
+			MethodName: "InboundDuplicate",
+			Handler:    _Daemon_InboundDuplicate_Handler,
+		},
+		{
+			MethodName: "InboundGetConfig",
+			Handler:    _Daemon_InboundGetConfig_Handler,
+		},
+		{
+			MethodName: "InboundSetConfig",
+			Handler:    _Daemon_InboundSetConfig_Handler,
 		},
 		{
 			MethodName: "Winners",

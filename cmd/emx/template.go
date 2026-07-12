@@ -6,7 +6,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/spf13/cobra"
 )
 

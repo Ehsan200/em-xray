@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gravisun/em-xray/core/xray"
-	"github.com/gravisun/em-xray/internal/xraybin"
+	"github.com/ehsan200/em-xray/core/xray"
+	"github.com/ehsan200/em-xray/internal/xraybin"
 )
 
 // TestTemplatesValidateWithXray generates a config for every built-in template

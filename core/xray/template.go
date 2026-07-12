@@ -19,7 +19,14 @@ type Template struct {
 	RealityDest string
 	RealitySNI  string
 	Path        string
+	Host        string
+	TLSSNI      string
 }
+
+// TLSCertFunc generates a self-signed TLS keypair for the given SNI. The daemon
+// overrides it to shell out to `xray tls cert`; the pure-Go NewSelfSignedTLS is
+// the default so core unit tests need no xray binary.
+var TLSCertFunc = NewSelfSignedTLS
 
 // DefaultTemplate is used when none is specified: vless + REALITY + vision, the
 // most robust choice against active probing, and fully auto-configurable.
@@ -32,6 +39,41 @@ var templates = map[string]Template{
 		Protocol: "vless", Network: "tcp", Security: "reality", Flow: "xtls-rprx-vision",
 		Listen: "0.0.0.0", RealityDest: "www.microsoft.com:443", RealitySNI: "www.microsoft.com",
 	},
+	"vless-reality-grpc": {
+		Name: "vless-reality-grpc", Description: "vless + REALITY over gRPC — multiplexed, probe-resistant",
+		Protocol: "vless", Network: "grpc", Security: "reality", Listen: "0.0.0.0",
+		RealityDest: "www.microsoft.com:443", RealitySNI: "www.microsoft.com", Path: "grpc",
+	},
+	"vless-reality-xhttp": {
+		Name: "vless-reality-xhttp", Description: "vless + REALITY over XHTTP — CDN-splittable, probe-resistant",
+		Protocol: "vless", Network: "xhttp", Security: "reality", Listen: "0.0.0.0",
+		RealityDest: "www.microsoft.com:443", RealitySNI: "www.microsoft.com", Path: "/",
+	},
+	"vless-tls": {
+		Name: "vless-tls", Description: "vless + TLS (vision, self-signed) — no domain needed",
+		Protocol: "vless", Network: "tcp", Security: "tls", Flow: "xtls-rprx-vision",
+		Listen: "0.0.0.0",
+	},
+	"vless-tls-ws": {
+		Name: "vless-tls-ws", Description: "vless + TLS over websocket (self-signed) — CDN-friendly",
+		Protocol: "vless", Network: "ws", Security: "tls", Listen: "0.0.0.0",
+		Path: "/",
+	},
+	"vless-tls-xhttp": {
+		Name: "vless-tls-xhttp", Description: "vless + TLS over XHTTP (self-signed)",
+		Protocol: "vless", Network: "xhttp", Security: "tls", Listen: "0.0.0.0",
+		Path: "/",
+	},
+	"vless-tls-grpc": {
+		Name: "vless-tls-grpc", Description: "vless + TLS over gRPC (self-signed)",
+		Protocol: "vless", Network: "grpc", Security: "tls", Listen: "0.0.0.0",
+		Path: "grpc",
+	},
+	"vless-tls-httpupgrade": {
+		Name: "vless-tls-httpupgrade", Description: "vless + TLS over HTTPUpgrade (self-signed)",
+		Protocol: "vless", Network: "httpupgrade", Security: "tls", Listen: "0.0.0.0",
+		Path: "/",
+	},
 	"vmess-ws": {
 		Name: "vmess-ws", Description: "vmess + websocket — CDN-friendly",
 		Protocol: "vmess", Network: "ws", Security: "none", Listen: "0.0.0.0", Path: "/",
@@ -39,6 +81,20 @@ var templates = map[string]Template{
 	"vmess-tcp": {
 		Name: "vmess-tcp", Description: "vmess over plain tcp",
 		Protocol: "vmess", Network: "tcp", Security: "none", Listen: "0.0.0.0",
+	},
+	"vmess-tls-ws": {
+		Name: "vmess-tls-ws", Description: "vmess + TLS over websocket (self-signed)",
+		Protocol: "vmess", Network: "ws", Security: "tls", Listen: "0.0.0.0",
+		Path: "/",
+	},
+	"trojan-tls": {
+		Name: "trojan-tls", Description: "trojan + TLS (self-signed) — no domain needed",
+		Protocol: "trojan", Network: "tcp", Security: "tls", Listen: "0.0.0.0",
+	},
+	"trojan-tls-ws": {
+		Name: "trojan-tls-ws", Description: "trojan + TLS over websocket (self-signed)",
+		Protocol: "trojan", Network: "ws", Security: "tls", Listen: "0.0.0.0",
+		Path: "/",
 	},
 	"socks": {
 		Name: "socks", Description: "local SOCKS5 proxy (loopback)",
@@ -91,8 +147,10 @@ func NewInboundFromTemplate(name, templateName, target string) (*Inbound, error)
 		Flow:        t.Flow,
 		Listen:      t.Listen,
 		Path:        t.Path,
+		Host:        t.Host,
 		RealityDest: t.RealityDest,
 		RealitySNI:  t.RealitySNI,
+		TLSSNI:      t.TLSSNI,
 		Enabled:     true,
 		Target:      target,
 	}
@@ -154,6 +212,18 @@ func Materialize(in *Inbound) error {
 		}
 		if in.RealitySNI == "" {
 			in.RealitySNI = "www.microsoft.com"
+		}
+	}
+	if in.Security == "tls" {
+		// SNI is OPTIONAL for self-signed TLS — clients trust the cert via
+		// allowInsecure and can dial by IP with no serverName. Only set when the
+		// user actually has a domain.
+		if in.TLSCert == "" || in.TLSKey == "" {
+			c, err := TLSCertFunc(in.TLSSNI)
+			if err != nil {
+				return err
+			}
+			in.TLSCert, in.TLSKey = c.Certificate, c.PrivateKey
 		}
 	}
 	return nil

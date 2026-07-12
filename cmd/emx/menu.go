@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/spf13/cobra"
 )
 
@@ -107,10 +107,12 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 		title := fmt.Sprintf("Inbound: %s (%s :%d → %s)", in.Name, in.Protocol, in.Port, in.Target)
 		i, ok := runSelect(title, []selectItem{
 			{"Show client link", ""},
+			{"Duplicate", ""},
+			{"Edit JSON", ""},
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 2 {
+		if !ok || i == 4 {
 			return
 		}
 		switch i {
@@ -121,6 +123,18 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 				notify("(this protocol has no share link)")
 			}
 		case 1:
+			name, _ := runInput("Name for the copy", in.Name+" copy")
+			ctx, cancel := call()
+			reply, err := s.c.InboundDuplicate(ctx, &emxv1.DuplicateRequest{Id: in.Id, NewName: name})
+			cancel()
+			if err != nil {
+				notify("error: %v", err)
+			} else {
+				notify("duplicated to %s (:%d)", reply.Inbound.Name, reply.Inbound.Port)
+			}
+		case 2:
+			s.editConfig("inbound", in.Id)
+		case 3:
 			if confirm("Remove inbound " + in.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.InboundRemove(ctx, &emxv1.IdRequest{Id: in.Id})
@@ -227,10 +241,14 @@ func (s *menuSession) subsMenu() {
 			if !sub.Enabled {
 				state = "disabled"
 			}
-			items = append(items, selectItem{
-				label: sub.Name,
-				desc:  fmt.Sprintf("%s · %d nodes, %d active", state, sub.NodeCount, sub.ActiveCount),
-			})
+			meta := fmt.Sprintf("%s · %d nodes, %d active", state, sub.NodeCount, sub.ActiveCount)
+			if u := usedLine(sub); u != "-" {
+				meta += " · " + u
+			}
+			if e := expiryShort(sub.Expire); e != "-" {
+				meta += " · exp " + e
+			}
+			items = append(items, selectItem{label: sub.Name, desc: meta})
 		}
 		items = append(items, selectItem{label: "+ Add subscription"}, selectItem{label: "← Back"})
 
@@ -273,6 +291,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			toggle = "Enable"
 		}
 		i, ok := runSelect(fmt.Sprintf("Subscription: %s (%d active)", sub.Name, sub.ActiveCount), []selectItem{
+			{"View metadata", ""},
 			{"View / toggle nodes", ""},
 			{"Refresh now", ""},
 			{toggle, ""},
@@ -280,13 +299,15 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 5 {
+		if !ok || i == 6 {
 			return
 		}
 		switch i {
 		case 0:
-			s.nodesMenu(sub)
+			fmt.Print("\n" + subMetaText(sub) + "\n")
 		case 1:
+			s.nodesMenu(sub)
+		case 2:
 			notify("refreshing…")
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			r, err := s.c.SubRefresh(ctx, &emxv1.SubRefreshRequest{Id: sub.Id})
@@ -296,7 +317,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				notify("refreshed: %d nodes", r.Nodes)
 			}
-		case 2:
+		case 3:
 			ctx, cancel := call()
 			_, err := s.c.SubSetEnabled(ctx, &emxv1.SetEnabledRequest{Id: sub.Id, Enabled: !sub.Enabled})
 			cancel()
@@ -305,7 +326,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				sub.Enabled = !sub.Enabled
 			}
-		case 3:
+		case 4:
 			name, ok := runInput("New name", sub.Name)
 			if !ok || name == "" || name == sub.Name {
 				break
@@ -319,7 +340,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 				notify("renamed to %s", name)
 				sub.Name = name
 			}
-		case 4:
+		case 5:
 			if confirm("Remove subscription " + sub.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.SubRemove(ctx, &emxv1.IdRequest{Id: sub.Id})
@@ -423,9 +444,9 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 		kind = "master → " + e.Dialer
 	}
 	i, ok := runSelect(fmt.Sprintf("%s (%s)", e.Name, kind), []selectItem{
-		{"Rename", ""}, {"Remove", ""}, {"← Back", ""},
+		{"Rename", ""}, {"Duplicate", ""}, {"Edit JSON", ""}, {"Remove", ""}, {"← Back", ""},
 	})
-	if !ok || i == 2 {
+	if !ok || i == 4 {
 		return
 	}
 	switch i {
@@ -443,6 +464,18 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 			notify("renamed to %s", name)
 		}
 	case 1:
+		name, _ := runInput("Name for the copy", e.Name+" copy")
+		ctx, cancel := call()
+		reply, err := s.c.EntryDuplicate(ctx, &emxv1.DuplicateRequest{Id: e.Id, NewName: name})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+		} else {
+			notify("duplicated to %s", reply.Entry.Name)
+		}
+	case 2:
+		s.editConfig("entry", e.Id)
+	case 3:
 		if confirm("Remove entry " + e.Name + "?") {
 			ctx, cancel := call()
 			_, err := s.c.EntryRemove(ctx, &emxv1.IdRequest{Id: e.Id})
@@ -453,6 +486,45 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 				notify("removed %s", e.Name)
 			}
 		}
+	}
+}
+
+// editConfig opens the given config (kind "inbound" or "entry") in $EDITOR and
+// saves the result. It drops out of the TUI while the editor runs.
+func (s *menuSession) editConfig(kind string, id uint32) {
+	ctx, cancel := call()
+	var cur *emxv1.ConfigReply
+	var err error
+	if kind == "inbound" {
+		cur, err = s.c.InboundGetConfig(ctx, &emxv1.IdRequest{Id: id})
+	} else {
+		cur, err = s.c.EntryGetConfig(ctx, &emxv1.IdRequest{Id: id})
+	}
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	edited, changed, err := editInEditor(cur.Json, ".json")
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	if !changed {
+		notify("no changes")
+		return
+	}
+	ctx, cancel = call()
+	if kind == "inbound" {
+		_, err = s.c.InboundSetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
+	} else {
+		_, err = s.c.EntrySetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
+	}
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+	} else {
+		notify("saved")
 	}
 }
 

@@ -2,10 +2,11 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
-	"github.com/gravisun/em-xray/core/xray"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/core/xray"
 )
 
 // ---- templates -------------------------------------------------------------
@@ -75,6 +76,47 @@ func (s *Server) EntryRename(ctx context.Context, req *emxv1.RenameRequest) (*em
 		return nil, err
 	}
 	return &emxv1.Empty{}, s.sup.Reconcile()
+}
+
+func (s *Server) EntryDuplicate(ctx context.Context, req *emxv1.DuplicateRequest) (*emxv1.EntryReply, error) {
+	dup, err := s.store.DuplicateEntry(uint(req.Id), req.NewName)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.sup.Reconcile(); err != nil {
+		return nil, fmt.Errorf("stored, but reconcile failed: %w", err)
+	}
+	return &emxv1.EntryReply{Entry: entryInfo(*dup)}, nil
+}
+
+// EntryGetConfig returns the entry's raw outbound JSON, pretty-printed for editing.
+func (s *Server) EntryGetConfig(ctx context.Context, req *emxv1.IdRequest) (*emxv1.ConfigReply, error) {
+	e, err := s.store.GetEntry(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	return &emxv1.ConfigReply{Json: prettyJSON(e.Outbound)}, nil
+}
+
+// EntrySetConfig replaces the entry's outbound from edited JSON (validated as a
+// JSON object) and reconciles.
+func (s *Server) EntrySetConfig(ctx context.Context, req *emxv1.SetConfigRequest) (*emxv1.EntryReply, error) {
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(req.Json), &probe); err != nil {
+		return nil, fmt.Errorf("invalid outbound JSON: %w", err)
+	}
+	e, err := s.store.GetEntry(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	e.Outbound = req.Json
+	if err := s.store.UpdateEntry(e); err != nil {
+		return nil, err
+	}
+	if err := s.sup.Reconcile(); err != nil {
+		return nil, fmt.Errorf("saved, but reconcile failed (check your JSON): %w", err)
+	}
+	return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
 }
 
 // validateDialer rejects a master whose dialer is malformed, references a
@@ -166,6 +208,78 @@ func (s *Server) InboundRemove(ctx context.Context, req *emxv1.IdRequest) (*emxv
 		return nil, err
 	}
 	return &emxv1.Empty{}, s.sup.Reconcile()
+}
+
+func (s *Server) InboundDuplicate(ctx context.Context, req *emxv1.DuplicateRequest) (*emxv1.InboundReply, error) {
+	dup, err := s.store.DuplicateInbound(uint(req.Id), req.NewName)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.sup.Reconcile(); err != nil {
+		return nil, fmt.Errorf("stored, but reconcile failed: %w", err)
+	}
+	return &emxv1.InboundReply{Inbound: s.inboundInfo(*dup)}, nil
+}
+
+// InboundGetConfig returns the inbound as pretty JSON. All fields are editable;
+// blanked required fields (uuid/keys/cert) are regenerated on save.
+func (s *Server) InboundGetConfig(ctx context.Context, req *emxv1.IdRequest) (*emxv1.ConfigReply, error) {
+	in, err := s.store.GetInbound(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.MarshalIndent(in, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return &emxv1.ConfigReply{Json: string(b)}, nil
+}
+
+// InboundSetConfig replaces an inbound from edited JSON. The row id and creation
+// time are preserved; required blanks are re-materialized; a 0 port is
+// re-assigned. Then it reconciles.
+func (s *Server) InboundSetConfig(ctx context.Context, req *emxv1.SetConfigRequest) (*emxv1.InboundReply, error) {
+	cur, err := s.store.GetInbound(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	var edited xray.Inbound
+	if err := json.Unmarshal([]byte(req.Json), &edited); err != nil {
+		return nil, fmt.Errorf("invalid inbound JSON: %w", err)
+	}
+	// Preserve identity: the id and created-at can't be changed by an edit.
+	edited.ID = cur.ID
+	edited.CreatedAt = cur.CreatedAt
+	if _, _, err := xray.ParseTarget(edited.Target); err != nil {
+		return nil, err
+	}
+	if err := xray.Materialize(&edited); err != nil {
+		return nil, err
+	}
+	if edited.Port == 0 {
+		// Reuse the current port if it had one, else let the store assign.
+		edited.Port = cur.Port
+	}
+	if err := s.store.UpdateInbound(&edited); err != nil {
+		return nil, err
+	}
+	if err := s.sup.Reconcile(); err != nil {
+		return nil, fmt.Errorf("saved, but reconcile failed (check your JSON): %w", err)
+	}
+	return &emxv1.InboundReply{Inbound: s.inboundInfo(edited)}, nil
+}
+
+// prettyJSON re-indents a JSON string; returns it unchanged if it doesn't parse.
+func prettyJSON(raw string) string {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return raw
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return raw
+	}
+	return string(b)
 }
 
 // inboundInfo builds the wire form, resolving the share-link host: an explicit

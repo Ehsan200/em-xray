@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gravisun/em-xray/core/xray"
+	"github.com/ehsan200/em-xray/core/xray"
 )
 
 // SyncDialerMembers is the live, no-restart update path for routine node churn

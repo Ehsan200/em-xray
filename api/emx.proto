@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package emx.v1;
 
-option go_package = "github.com/gravisun/em-xray/api/emxv1;emxv1";
+option go_package = "github.com/ehsan200/em-xray/api/emxv1;emxv1";
 
 // Daemon is the control surface the CLI/TUI drives over the unix socket.
 service Daemon {
@@ -19,11 +19,17 @@ service Daemon {
   rpc EntryList(Empty) returns (EntryListReply);
   rpc EntryRemove(IdRequest) returns (Empty);
   rpc EntryRename(RenameRequest) returns (Empty);
+  rpc EntryDuplicate(DuplicateRequest) returns (EntryReply);
+  rpc EntryGetConfig(IdRequest) returns (ConfigReply);     // raw outbound JSON
+  rpc EntrySetConfig(SetConfigRequest) returns (EntryReply);
 
   // Inbounds (server listeners routed to a target).
   rpc InboundAdd(InboundAddRequest) returns (InboundReply);
   rpc InboundList(Empty) returns (InboundListReply);
   rpc InboundRemove(IdRequest) returns (Empty);
+  rpc InboundDuplicate(DuplicateRequest) returns (InboundReply);
+  rpc InboundGetConfig(IdRequest) returns (ConfigReply);    // editable inbound JSON
+  rpc InboundSetConfig(SetConfigRequest) returns (InboundReply);
 
   // Winner: the current fastest (balancer-selected) node per master.
   rpc Winners(Empty) returns (WinnersReply);
@@ -75,6 +81,10 @@ message SubInfo {
   int64 download = 9;
   int64 total = 10;
   int64 expire = 11;
+  int64 last_fetched = 12; // unix seconds; 0 => never
+  string user_agent = 13;
+  int32 interval_sec = 14;
+  int32 node_cap = 15;
 }
 message SubReply { SubInfo sub = 1; }
 message SubListReply { repeated SubInfo subs = 1; }
@@ -99,6 +109,19 @@ message SubNodeDisabledRequest {
 
 message Empty {}
 message IdRequest { uint32 id = 1; }
+
+// Duplicate an existing inbound/entry under a new name.
+message DuplicateRequest {
+  uint32 id = 1;
+  string new_name = 2; // "" => "<source> copy"
+}
+// ConfigReply carries a config as pretty-printed JSON for editing.
+message ConfigReply { string json = 1; }
+// SetConfigRequest replaces a config from edited JSON.
+message SetConfigRequest {
+  uint32 id = 1;
+  string json = 2;
+}
 
 message PingRequest {}
 message PingReply {

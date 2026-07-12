@@ -10,7 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +20,67 @@ func inboundCmd() *cobra.Command {
 		Short: "manage server inbounds (vless/vmess/socks listeners)",
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "in") },
 	}
-	c.AddCommand(inboundAddCmd(), inboundListCmd(), inboundRemoveCmd())
+	c.AddCommand(inboundAddCmd(), inboundListCmd(), inboundRemoveCmd(),
+		inboundDuplicateCmd(), inboundEditCmd())
 	return c
+}
+
+func inboundDuplicateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "duplicate <id> [new-name]", Short: "clone an inbound (fresh keys + port)",
+		Aliases: []string{"dup", "copy"}, Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			name := ""
+			if len(args) == 2 {
+				name = args[1]
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.InboundDuplicate(ctx, &emxv1.DuplicateRequest{Id: id, NewName: name})
+				if err != nil {
+					return err
+				}
+				printInbound(cmd.OutOrStdout(), reply.Inbound, true)
+				return nil
+			})
+		},
+	}
+}
+
+func inboundEditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "edit <id>", Short: "edit an inbound's JSON in $EDITOR (blank keys regenerate on save)",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				cur, err := cl.InboundGetConfig(ctx, &emxv1.IdRequest{Id: id})
+				if err != nil {
+					return err
+				}
+				edited, changed, err := editInEditor(cur.Json, ".json")
+				if err != nil {
+					return err
+				}
+				if !changed {
+					fmt.Fprintln(cmd.OutOrStdout(), "no changes")
+					return nil
+				}
+				reply, err := cl.InboundSetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
+				if err != nil {
+					return err
+				}
+				printInboundVerb(cmd.OutOrStdout(), "updated", reply.Inbound, true)
+				return nil
+			})
+		},
+	}
 }
 
 func inboundAddCmd() *cobra.Command {
@@ -147,7 +206,11 @@ func inboundRemoveCmd() *cobra.Command {
 }
 
 func printInbound(w interface{ Write([]byte) (int, error) }, in *emxv1.InboundInfo, withLink bool) {
-	fmt.Fprintf(w, "added inbound %q (id %d): %s on :%d → %s\n", in.Name, in.Id, in.Protocol, in.Port, in.Target)
+	printInboundVerb(w, "added", in, withLink)
+}
+
+func printInboundVerb(w interface{ Write([]byte) (int, error) }, verb string, in *emxv1.InboundInfo, withLink bool) {
+	fmt.Fprintf(w, "%s inbound %q (id %d): %s on :%d → %s\n", verb, in.Name, in.Id, in.Protocol, in.Port, in.Target)
 	if withLink && in.ShareLink != "" {
 		fmt.Fprintf(w, "\nclient link:\n  %s\n", in.ShareLink)
 		if strings.Contains(in.ShareLink, "SERVER_IP") {

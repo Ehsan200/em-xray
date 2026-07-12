@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
-	"github.com/gravisun/em-xray/core/xray"
-	"github.com/gravisun/em-xray/internal/selfupdate"
-	"github.com/gravisun/em-xray/internal/xraybin"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/core/xray"
+	"github.com/ehsan200/em-xray/internal/selfupdate"
+	"github.com/ehsan200/em-xray/internal/xraybin"
 )
 
 // buildVersion is set by the daemon binary at init via SetVersion so Ping can

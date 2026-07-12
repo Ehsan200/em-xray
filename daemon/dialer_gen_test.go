@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gravisun/em-xray/core/xray"
-	"github.com/gravisun/em-xray/internal/paths"
-	"github.com/gravisun/em-xray/internal/xraybin"
+	"github.com/ehsan200/em-xray/core/xray"
+	"github.com/ehsan200/em-xray/internal/paths"
+	"github.com/ehsan200/em-xray/internal/xraybin"
 )
 
 // TestDialerConfigValidatesWithXray builds a full master-dialer config (api +

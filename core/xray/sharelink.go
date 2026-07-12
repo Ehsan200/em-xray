@@ -38,13 +38,13 @@ func ShareLink(in Inbound, host string) string {
 			q.Set("sid", in.RealityShortID)
 		case "tls":
 			q.Set("security", "tls")
-		}
-		if in.Network == "ws" {
-			q.Set("path", orDefault(in.Path, "/"))
-			if in.Host != "" {
-				q.Set("host", in.Host)
+			q.Set("fp", "chrome")
+			if in.TLSSNI != "" {
+				q.Set("sni", in.TLSSNI)
 			}
+			q.Set("allowInsecure", "1") // self-signed cert
 		}
+		setTransportQuery(q, in)
 		return fmt.Sprintf("vless://%s@%s:%s?%s#%s", in.UUID, host, port, q.Encode(), url.QueryEscape(in.Name))
 
 	case "vmess":
@@ -64,11 +64,31 @@ func ShareLink(in Inbound, host string) string {
 		q := url.Values{}
 		if in.Security == "tls" {
 			q.Set("security", "tls")
+			q.Set("fp", "chrome")
+			if in.TLSSNI != "" {
+				q.Set("sni", in.TLSSNI)
+			}
+			q.Set("allowInsecure", "1") // self-signed cert
 		}
 		q.Set("type", orDefault(in.Network, "tcp"))
+		setTransportQuery(q, in)
 		return fmt.Sprintf("trojan://%s@%s:%s?%s#%s", in.Password, host, port, q.Encode(), url.QueryEscape(in.Name))
 
 	default:
 		return ""
+	}
+}
+
+// setTransportQuery adds transport-specific params (path/host/serviceName) to a
+// vless/trojan share link based on the inbound's network.
+func setTransportQuery(q url.Values, in Inbound) {
+	switch in.Network {
+	case "ws", "httpupgrade", "xhttp":
+		q.Set("path", orDefault(in.Path, "/"))
+		if in.Host != "" {
+			q.Set("host", in.Host)
+		}
+	case "grpc":
+		q.Set("serviceName", in.Path)
 	}
 }

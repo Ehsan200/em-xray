@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
-	"github.com/gravisun/em-xray/daemon"
-	"github.com/gravisun/em-xray/internal/paths"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/daemon"
+	"github.com/ehsan200/em-xray/internal/paths"
 	"github.com/spf13/cobra"
 )
 

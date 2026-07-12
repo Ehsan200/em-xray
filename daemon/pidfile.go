@@ -6,7 +6,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/gravisun/em-xray/internal/paths"
+	"github.com/ehsan200/em-xray/internal/paths"
 )
 
 // RunningPID returns the daemon pid recorded in the pid file and whether that

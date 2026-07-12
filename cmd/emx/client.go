@@ -6,9 +6,9 @@ import (
 	"net"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
-	"github.com/gravisun/em-xray/internal/paths"
-	"github.com/gravisun/em-xray/internal/xraybin"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/internal/paths"
+	"github.com/ehsan200/em-xray/internal/xraybin"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

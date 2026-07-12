@@ -6,9 +6,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/gravisun/em-xray/daemon"
-	"github.com/gravisun/em-xray/internal/paths"
-	"github.com/gravisun/em-xray/internal/selfupdate"
+	"github.com/ehsan200/em-xray/daemon"
+	"github.com/ehsan200/em-xray/internal/paths"
+	"github.com/ehsan200/em-xray/internal/selfupdate"
 	"github.com/spf13/cobra"
 )
 

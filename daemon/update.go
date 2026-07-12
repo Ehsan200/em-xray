@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/gravisun/em-xray/internal/selfupdate"
+	"github.com/ehsan200/em-xray/internal/selfupdate"
 )
 
 // updateCheckInterval is how often the daemon polls GitHub for a newer release.

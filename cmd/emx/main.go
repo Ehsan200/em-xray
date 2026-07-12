@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gravisun/em-xray/daemon"
+	"github.com/ehsan200/em-xray/daemon"
 	"github.com/spf13/cobra"
 )
 

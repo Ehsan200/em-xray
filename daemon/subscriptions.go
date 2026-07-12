@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gravisun/em-xray/core/xray"
+	"github.com/ehsan200/em-xray/core/xray"
 )
 
 // SubFetcher schedules and executes subscription refreshes. A successful refresh

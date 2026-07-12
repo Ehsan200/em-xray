@@ -2,6 +2,7 @@ package xray
 
 import (
 	"errors"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -413,6 +414,56 @@ func (s *Store) DeleteInbound(id uint) error { return s.db.Delete(&Inbound{}, id
 
 func (s *Store) SetInboundEnabled(id uint, enabled bool) error {
 	return s.db.Model(&Inbound{}).Where("id = ?", id).Update("enabled", enabled).Error
+}
+
+// DuplicateInbound clones an inbound under newName with FRESH credentials
+// (uuid/password/reality keys/tls cert) and a newly-assigned port, so the copy
+// is an independent server sharing only the source's shape (protocol/transport/
+// security/target). PublicHost is carried over.
+func (s *Store) DuplicateInbound(id uint, newName string) (*Inbound, error) {
+	src, err := s.GetInbound(id)
+	if err != nil {
+		return nil, err
+	}
+	dup := *src
+	dup.ID = 0
+	dup.Name = defaultCopyName(newName, src.Name)
+	dup.Port = 0
+	dup.UUID = ""
+	dup.Password = ""
+	dup.RealityPrivateKey, dup.RealityPublicKey, dup.RealityShortID = "", "", ""
+	dup.TLSCert, dup.TLSKey = "", ""
+	dup.CreatedAt, dup.UpdatedAt = time.Time{}, time.Time{}
+	if err := Materialize(&dup); err != nil {
+		return nil, err
+	}
+	if err := s.CreateInbound(&dup); err != nil {
+		return nil, err
+	}
+	return &dup, nil
+}
+
+// DuplicateEntry clones an entry (outbound + dialer) under newName. The outbound
+// JSON is copied verbatim — an outbound describes a remote server, so a duplicate
+// is intentionally identical apart from its name.
+func (s *Store) DuplicateEntry(id uint, newName string) (*XrayEntry, error) {
+	src, err := s.GetEntry(id)
+	if err != nil {
+		return nil, err
+	}
+	dup := &XrayEntry{Name: defaultCopyName(newName, src.Name), Outbound: src.Outbound, Enabled: src.Enabled, Dialer: src.Dialer}
+	if err := s.CreateEntry(dup); err != nil {
+		return nil, err
+	}
+	return dup, nil
+}
+
+// defaultCopyName returns newName, or "<src> copy" when newName is blank.
+func defaultCopyName(newName, src string) string {
+	if NormalizeName(newName) != "" {
+		return newName
+	}
+	return src + " copy"
 }
 
 // one maps gorm's ErrRecordNotFound to ErrNotFound and returns the row otherwise.

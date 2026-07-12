@@ -3,7 +3,7 @@ package daemon
 import (
 	"strings"
 
-	"github.com/gravisun/em-xray/core/xray"
+	"github.com/ehsan200/em-xray/core/xray"
 )
 
 // Winner is the balancer-selected (fastest) member for one master.

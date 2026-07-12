@@ -1,4 +1,4 @@
-module github.com/gravisun/em-xray
+module github.com/ehsan200/em-xray
 
 go 1.26
 

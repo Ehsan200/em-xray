@@ -7,7 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	emxv1 "github.com/gravisun/em-xray/api/emxv1"
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/spf13/cobra"
 )
 
@@ -17,8 +17,67 @@ func entryCmd() *cobra.Command {
 		Short: "manage outbounds (and masters)",
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "entry") },
 	}
-	c.AddCommand(entryAddCmd(), entryListCmd(), entryRemoveCmd(), entryRenameCmd())
+	c.AddCommand(entryAddCmd(), entryListCmd(), entryRemoveCmd(), entryRenameCmd(),
+		entryDuplicateCmd(), entryEditCmd())
 	return c
+}
+
+func entryDuplicateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "duplicate <id> [new-name]", Short: "clone an entry (same outbound + dialer)",
+		Aliases: []string{"dup", "copy"}, Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			name := ""
+			if len(args) == 2 {
+				name = args[1]
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.EntryDuplicate(ctx, &emxv1.DuplicateRequest{Id: id, NewName: name})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "duplicated to %q (id %d)\n", reply.Entry.Name, reply.Entry.Id)
+				return nil
+			})
+		},
+	}
+}
+
+func entryEditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "edit <id>", Short: "edit an entry's outbound JSON in $EDITOR",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				cur, err := cl.EntryGetConfig(ctx, &emxv1.IdRequest{Id: id})
+				if err != nil {
+					return err
+				}
+				edited, changed, err := editInEditor(cur.Json, ".json")
+				if err != nil {
+					return err
+				}
+				if !changed {
+					fmt.Fprintln(cmd.OutOrStdout(), "no changes")
+					return nil
+				}
+				reply, err := cl.EntrySetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "updated %q (id %d)\n", reply.Entry.Name, reply.Entry.Id)
+				return nil
+			})
+		},
+	}
 }
 
 func entryRenameCmd() *cobra.Command {
