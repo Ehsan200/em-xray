@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package emx.v1;
+
+option go_package = "github.com/gravisun/em-xray/api/emxv1;emxv1";
+
+// Daemon is the control surface the CLI/TUI drives over the unix socket.
+service Daemon {
+  // Lifecycle / health.
+  rpc Ping(PingRequest) returns (PingReply);
+  rpc Status(StatusRequest) returns (StatusReply);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownReply);
+
+  // Templates.
+  rpc TemplateList(Empty) returns (TemplateListReply);
+
+  // Entries (outbounds; a non-empty dialer makes one a master).
+  rpc EntryAdd(EntryAddRequest) returns (EntryReply);
+  rpc EntryList(Empty) returns (EntryListReply);
+  rpc EntryRemove(IdRequest) returns (Empty);
+  rpc EntryRename(RenameRequest) returns (Empty);
+
+  // Inbounds (server listeners routed to a target).
+  rpc InboundAdd(InboundAddRequest) returns (InboundReply);
+  rpc InboundList(Empty) returns (InboundListReply);
+  rpc InboundRemove(IdRequest) returns (Empty);
+
+  // Winner: the current fastest (balancer-selected) node per master.
+  rpc Winners(Empty) returns (WinnersReply);
+
+  // Subscriptions (node pools consumed by masters via xraysub:NAME).
+  rpc SubAdd(SubAddRequest) returns (SubReply);
+  rpc SubList(Empty) returns (SubListReply);
+  rpc SubRemove(IdRequest) returns (Empty);
+  rpc SubSetEnabled(SetEnabledRequest) returns (Empty);
+  rpc SubRefresh(SubRefreshRequest) returns (SubRefreshReply);
+  rpc SubNodes(IdRequest) returns (SubNodesReply);
+  rpc SubSetNodeDisabled(SubNodeDisabledRequest) returns (Empty);
+  rpc SubRename(RenameRequest) returns (Empty);
+}
+
+message RenameRequest {
+  uint32 id = 1;
+  string new_name = 2;
+}
+
+message SetEnabledRequest {
+  uint32 id = 1;
+  bool enabled = 2;
+}
+
+message WinnerInfo {
+  string master = 1;
+  string node = 2; // winning member name ("" if none selected yet)
+  string tag = 3;  // slotN-out-<key>
+}
+message WinnersReply { repeated WinnerInfo winners = 1; }
+
+message SubAddRequest {
+  string name = 1;
+  string url = 2;
+  string user_agent = 3;
+  int32 interval_sec = 4;
+  int32 node_cap = 5;
+}
+message SubInfo {
+  uint32 id = 1;
+  string name = 2;
+  string url = 3;
+  bool enabled = 4;
+  int32 node_count = 5;
+  int32 active_count = 6;
+  string last_error = 7;
+  int64 upload = 8;
+  int64 download = 9;
+  int64 total = 10;
+  int64 expire = 11;
+}
+message SubReply { SubInfo sub = 1; }
+message SubListReply { repeated SubInfo subs = 1; }
+
+message SubRefreshRequest { uint32 id = 1; } // 0 => all enabled
+message SubRefreshReply { int32 nodes = 1; }
+
+message NodeInfo {
+  string fingerprint = 1;
+  string name = 2;
+  bool active = 3;
+  bool disabled = 4;
+  int32 latency_ms = 5;
+}
+message SubNodesReply { repeated NodeInfo nodes = 1; }
+
+message SubNodeDisabledRequest {
+  uint32 sub_id = 1;
+  string fingerprint = 2;
+  bool disabled = 3;
+}
+
+message Empty {}
+message IdRequest { uint32 id = 1; }
+
+message PingRequest {}
+message PingReply {
+  string version = 1;
+  string xray_version = 2;
+}
+
+message StatusRequest {}
+message StatusReply {
+  int32 daemon_pid = 1;
+  int64 uptime_sec = 2;
+  XrayState xray = 3;
+}
+message XrayState {
+  bool running = 1;
+  int32 pid = 2;
+  int32 restarts = 3;
+  string last_error = 4;
+}
+
+message ShutdownRequest {}
+message ShutdownReply {}
+
+message Template {
+  string name = 1;
+  string description = 2;
+  string protocol = 3;
+  string network = 4;
+  string security = 5;
+}
+message TemplateListReply { repeated Template templates = 1; }
+
+message EntryAddRequest {
+  string name = 1;
+  string link = 2;          // share link to parse into an outbound (optional)
+  string outbound_json = 3; // raw outbound JSON (alternative to link)
+  string dialer = 4;        // non-empty => master
+  bool enabled = 5;
+}
+message EntryInfo {
+  uint32 id = 1;
+  string name = 2;
+  bool enabled = 3;
+  bool is_master = 4;
+  string dialer = 5;
+}
+message EntryReply { EntryInfo entry = 1; }
+message EntryListReply { repeated EntryInfo entries = 1; }
+
+message InboundAddRequest {
+  string name = 1;
+  string template = 2;    // "" => default (vless-reality)
+  string target = 3;      // master:NAME | xray:NAME | direct
+  string public_host = 4; // address clients dial (for the share link)
+  int32 port = 5;         // 0 => auto-assign
+}
+message InboundInfo {
+  uint32 id = 1;
+  string name = 2;
+  string protocol = 3;
+  int32 port = 4;
+  string security = 5;
+  string target = 6;
+  bool enabled = 7;
+  string uuid = 8;
+  string public_host = 9;
+  string share_link = 10;
+}
+message InboundReply { InboundInfo inbound = 1; }
+message InboundListReply { repeated InboundInfo inbounds = 1; }

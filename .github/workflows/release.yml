@@ -1,0 +1,68 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create releases + upload assets
+
+jobs:
+  build:
+    runs-on: ubuntu-latest   # all targets cross-compiled from one runner
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,  goarch: amd64, target: linux-64 }
+          - { goos: linux,  goarch: arm64, target: linux-arm64-v8a }
+          - { goos: darwin, goarch: amd64, target: macos-64 }
+          - { goos: darwin, goarch: arm64, target: macos-arm64-v8a }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      # Embed the xray binary matching THIS artifact's target (download only —
+      # no execution — so every triple builds fine on the linux runner).
+      - name: fetch xray assets
+        run: make fetch-xray TARGET=${{ matrix.target }}
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          out="dist/emx-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "$out"
+          go build -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "$out/emx" ./cmd/emx
+          cp README.md LICENSE "$out/" 2>/dev/null || true
+          tar -C dist -czf "emx-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" "emx-${{ matrix.goos }}-${{ matrix.goarch }}"
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emx-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: 'emx-*.tar.gz'
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: create release + upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            artifacts/*.tar.gz

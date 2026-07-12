@@ -1,0 +1,10 @@
+# build outputs
+/emx
+/dist/
+*.test
+
+# real embedded xray assets overwrite the committed placeholders locally via
+# scripts/fetch-xray.sh — never commit the fat binary / geo data.
+/internal/xraybin/assets/xray
+/internal/xraybin/assets/geoip.dat
+/internal/xraybin/assets/geosite.dat
