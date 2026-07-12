@@ -97,6 +97,30 @@ emx winner
 
 Prefer menus? Just run `emx` (or `emx sub`, `emx in`, `emx entry`) with no arguments.
 
+### Keep it running (systemd)
+
+`emx start` supervises the xray child itself, but to survive a **reboot or a daemon crash**, install a
+systemd service:
+
+```bash
+emx systemd install --now        # user service (default); starts + enables it
+loginctl enable-linger "$USER"   # keep it running across reboots without a login session
+
+# system-wide (needs root) instead:
+sudo emx systemd install --system --now
+```
+
+`emx systemd print` shows the unit without installing; `emx systemd uninstall` removes it.
+
+### Updating
+
+```bash
+emx update           # check GitHub, download the matching build, swap the binary, restart the daemon
+emx update --check   # just report whether a newer release exists
+```
+
+The running daemon also checks for new releases every 6h and flags it in `emx status`.
+
 ---
 
 ## Concepts

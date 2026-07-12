@@ -8,7 +8,21 @@ permissions:
   contents: write   # create releases + upload assets
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - name: fetch xray assets
+        run: make fetch-xray TARGET=linux-64
+      - run: go vet ./...
+      - run: go test ./...
+
   build:
+    needs: test              # never publish a release that fails tests
     runs-on: ubuntu-latest   # all targets cross-compiled from one runner
     strategy:
       fail-fast: false

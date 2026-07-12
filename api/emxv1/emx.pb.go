@@ -990,12 +990,14 @@ func (*StatusRequest) Descriptor() ([]byte, []int) {
 }
 
 type StatusReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DaemonPid     int32                  `protobuf:"varint,1,opt,name=daemon_pid,json=daemonPid,proto3" json:"daemon_pid,omitempty"`
-	UptimeSec     int64                  `protobuf:"varint,2,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
-	Xray          *XrayState             `protobuf:"bytes,3,opt,name=xray,proto3" json:"xray,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	DaemonPid       int32                  `protobuf:"varint,1,opt,name=daemon_pid,json=daemonPid,proto3" json:"daemon_pid,omitempty"`
+	UptimeSec       int64                  `protobuf:"varint,2,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
+	Xray            *XrayState             `protobuf:"bytes,3,opt,name=xray,proto3" json:"xray,omitempty"`
+	LatestVersion   string                 `protobuf:"bytes,4,opt,name=latest_version,json=latestVersion,proto3" json:"latest_version,omitempty"`        // newest release tag the daemon has seen ("" = unknown)
+	UpdateAvailable bool                   `protobuf:"varint,5,opt,name=update_available,json=updateAvailable,proto3" json:"update_available,omitempty"` // latest_version is newer than the running build
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *StatusReply) Reset() {
@@ -1047,6 +1049,20 @@ func (x *StatusReply) GetXray() *XrayState {
 		return x.Xray
 	}
 	return nil
+}
+
+func (x *StatusReply) GetLatestVersion() string {
+	if x != nil {
+		return x.LatestVersion
+	}
+	return ""
+}
+
+func (x *StatusReply) GetUpdateAvailable() bool {
+	if x != nil {
+		return x.UpdateAvailable
+	}
+	return false
 }
 
 type XrayState struct {
@@ -1897,13 +1913,15 @@ const file_emx_proto_rawDesc = "" +
 	"\tPingReply\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12!\n" +
 	"\fxray_version\x18\x02 \x01(\tR\vxrayVersion\"\x0f\n" +
-	"\rStatusRequest\"r\n" +
+	"\rStatusRequest\"\xc4\x01\n" +
 	"\vStatusReply\x12\x1d\n" +
 	"\n" +
 	"daemon_pid\x18\x01 \x01(\x05R\tdaemonPid\x12\x1d\n" +
 	"\n" +
 	"uptime_sec\x18\x02 \x01(\x03R\tuptimeSec\x12%\n" +
-	"\x04xray\x18\x03 \x01(\v2\x11.emx.v1.XrayStateR\x04xray\"r\n" +
+	"\x04xray\x18\x03 \x01(\v2\x11.emx.v1.XrayStateR\x04xray\x12%\n" +
+	"\x0elatest_version\x18\x04 \x01(\tR\rlatestVersion\x12)\n" +
+	"\x10update_available\x18\x05 \x01(\bR\x0fupdateAvailable\"r\n" +
 	"\tXrayState\x12\x18\n" +
 	"\arunning\x18\x01 \x01(\bR\arunning\x12\x10\n" +
 	"\x03pid\x18\x02 \x01(\x05R\x03pid\x12\x1a\n" +

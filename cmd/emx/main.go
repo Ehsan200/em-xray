@@ -47,6 +47,8 @@ func rootCmd() *cobra.Command {
 		inboundCmd(),
 		subCmd(),
 		winnerCmd(),
+		updateCmd(),
+		systemdCmd(),
 		uiCmd(),
 	)
 	return root

@@ -116,18 +116,23 @@ func restartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "restart",
 		Short: "restart the background daemon",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			p := paths.Default()
-			if _, alive := daemon.RunningPID(p); alive {
-				if c, conn, err := dialReady(cmd.Context()); err == nil {
-					_, _ = c.Shutdown(cmd.Context(), &emxv1.ShutdownRequest{})
-					conn.Close()
-				}
-				_ = waitGone(p, 5*time.Second)
-			}
-			return startDetached(cmd)
-		},
+		RunE:  func(cmd *cobra.Command, _ []string) error { return restartDaemon(cmd) },
 	}
+}
+
+// restartDaemon stops the running daemon (graceful RPC, then re-spawns). Spawns
+// fresh even if it wasn't running. Used by `emx restart` and by `emx update`
+// after swapping the binary so the new code takes effect.
+func restartDaemon(cmd *cobra.Command) error {
+	p := paths.Default()
+	if _, alive := daemon.RunningPID(p); alive {
+		if c, conn, err := dialReady(cmd.Context()); err == nil {
+			_, _ = c.Shutdown(cmd.Context(), &emxv1.ShutdownRequest{})
+			conn.Close()
+		}
+		_ = waitGone(p, 5*time.Second)
+	}
+	return startDetached(cmd)
 }
 
 func statusCmd() *cobra.Command {
@@ -158,6 +163,9 @@ func statusCmd() *cobra.Command {
 					le = " — " + x.LastError
 				}
 				fmt.Fprintf(out, "xray:    stopped%s\n", le)
+			}
+			if st.UpdateAvailable {
+				fmt.Fprintf(out, "update:  %s available (run `emx update`)\n", st.LatestVersion)
 			}
 			return nil
 		},

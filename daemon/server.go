@@ -8,6 +8,7 @@ import (
 
 	emxv1 "github.com/gravisun/em-xray/api/emxv1"
 	"github.com/gravisun/em-xray/core/xray"
+	"github.com/gravisun/em-xray/internal/selfupdate"
 	"github.com/gravisun/em-xray/internal/xraybin"
 )
 
@@ -32,6 +33,22 @@ type Server struct {
 
 	pubMu sync.Mutex
 	pubIP string // cached detected public IP for share-link hosts
+
+	updMu     sync.Mutex
+	latestVer string // newest release tag seen by the periodic update checker
+}
+
+// setLatest records the newest release tag the update checker found.
+func (s *Server) setLatest(tag string) {
+	s.updMu.Lock()
+	s.latestVer = tag
+	s.updMu.Unlock()
+}
+
+func (s *Server) latest() string {
+	s.updMu.Lock()
+	defer s.updMu.Unlock()
+	return s.latestVer
 }
 
 func (s *Server) Ping(context.Context, *emxv1.PingRequest) (*emxv1.PingReply, error) {
@@ -40,6 +57,7 @@ func (s *Server) Ping(context.Context, *emxv1.PingRequest) (*emxv1.PingReply, er
 
 func (s *Server) Status(context.Context, *emxv1.StatusRequest) (*emxv1.StatusReply, error) {
 	running, pid, restarts, lastErr := s.sup.XrayState()
+	latest := s.latest()
 	return &emxv1.StatusReply{
 		DaemonPid: int32(os.Getpid()),
 		UptimeSec: int64(time.Since(s.startTime).Seconds()),
@@ -49,6 +67,8 @@ func (s *Server) Status(context.Context, *emxv1.StatusRequest) (*emxv1.StatusRep
 			Restarts:  restarts,
 			LastError: lastErr,
 		},
+		LatestVersion:   latest,
+		UpdateAvailable: latest != "" && selfupdate.Newer(buildVersion, latest),
 	}, nil
 }
 

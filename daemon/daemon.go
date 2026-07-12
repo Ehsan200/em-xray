@@ -73,6 +73,7 @@ func Run(ctx context.Context) error {
 
 	stop := make(chan struct{})
 	srv := &Server{startTime: time.Now(), store: store, sup: sup, fetcher: fetcher, stop: stop}
+	go updateChecker(ctx, srv, logger)
 
 	gs := grpc.NewServer()
 	emxv1.RegisterDaemonServer(gs, srv)

@@ -111,6 +111,8 @@ message StatusReply {
   int32 daemon_pid = 1;
   int64 uptime_sec = 2;
   XrayState xray = 3;
+  string latest_version = 4;   // newest release tag the daemon has seen ("" = unknown)
+  bool update_available = 5;   // latest_version is newer than the running build
 }
 message XrayState {
   bool running = 1;

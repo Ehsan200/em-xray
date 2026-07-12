@@ -551,6 +551,9 @@ func (s *menuSession) statusView() {
 		}
 	}
 	wcancel()
+	if st.UpdateAvailable {
+		items = append(items, selectItem{label: "⬆ Update available: " + st.LatestVersion, desc: "run `emx update`"})
+	}
 	items = append(items, selectItem{label: "← Back"})
 	runSelect(fmt.Sprintf("Status — daemon pid %d, up %ds · xray %s", st.DaemonPid, st.UptimeSec, xray), items)
 }
