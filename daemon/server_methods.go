@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"time"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/ehsan200/em-xray/core/xray"
@@ -169,6 +171,75 @@ func (s *Server) Winners(context.Context, *emxv1.Empty) (*emxv1.WinnersReply, er
 		out = append(out, &emxv1.WinnerInfo{Master: w.Master, Node: w.Node, Tag: w.Tag})
 	}
 	return &emxv1.WinnersReply{Winners: out}, nil
+}
+
+// ---- traffic ---------------------------------------------------------------
+
+// Traffic returns per-inbound/outbound lifetime totals plus windowed totals and
+// per-hour buckets (oldest→newest, ending at the current hour) for charting.
+func (s *Server) Traffic(ctx context.Context, req *emxv1.TrafficRequest) (*emxv1.TrafficReply, error) {
+	window := time.Duration(req.WindowSec) * time.Second
+	if window <= 0 {
+		window = 24 * time.Hour
+	}
+	if window > xray.TrafficRetention {
+		window = xray.TrafficRetention
+	}
+	buckets := int(window / time.Hour)
+	if buckets < 1 {
+		buckets = 1
+	}
+	nowHour := xray.HourFloor(time.Now())
+	sinceHour := nowHour - int64(buckets-1)*3600
+
+	totals, err := s.store.TrafficTotals()
+	if err != nil {
+		return nil, err
+	}
+	var inbs, outs []*emxv1.TrafficItem
+	for _, t := range totals {
+		bs, err := s.store.TrafficBucketsSince(t.Kind, t.Tag, sinceHour)
+		if err != nil {
+			return nil, err
+		}
+		hu := make([]int64, buckets)
+		hd := make([]int64, buckets)
+		var wu, wd int64
+		for _, b := range bs {
+			slot := int((b.HourUnix - sinceHour) / 3600)
+			if slot < 0 || slot >= buckets {
+				continue
+			}
+			hu[slot] += b.Up
+			hd[slot] += b.Down
+			wu += b.Up
+			wd += b.Down
+		}
+		item := &emxv1.TrafficItem{
+			Kind: t.Kind, Name: t.Name,
+			TotalUp: t.Up, TotalDown: t.Down,
+			WindowUp: wu, WindowDown: wd,
+			HourlyUp: hu, HourlyDown: hd,
+		}
+		if t.Kind == xray.KindInbound {
+			inbs = append(inbs, item)
+		} else {
+			outs = append(outs, item)
+		}
+	}
+	sortTrafficDesc(inbs)
+	sortTrafficDesc(outs)
+	return &emxv1.TrafficReply{
+		Inbounds: inbs, Outbounds: outs,
+		WindowSec: int64(window.Seconds()), Buckets: int32(buckets),
+	}, nil
+}
+
+// sortTrafficDesc orders items by lifetime total (down+up) descending.
+func sortTrafficDesc(items []*emxv1.TrafficItem) {
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].TotalDown+items[i].TotalUp > items[j].TotalDown+items[j].TotalUp
+	})
 }
 
 // ---- inbounds --------------------------------------------------------------

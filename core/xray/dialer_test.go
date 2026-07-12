@@ -147,13 +147,31 @@ func mustGen(t *testing.T, entries []XrayEntry, slots []Slot) []byte {
 	return b
 }
 
-func TestGenerateNoSlotsNoApi(t *testing.T) {
+func TestGenerateNoSlotsNoObservatory(t *testing.T) {
 	b, _ := Generate([]XrayEntry{{Name: "e", Enabled: true, Outbound: `{"protocol":"freedom"}`}}, nil, nil, GenOptions{})
 	m := om(t, b)
-	if _, ok := m["api"]; ok {
-		t.Error("no slots => no api block")
+	// api + stats are always on now (for traffic counters); observatory is not.
+	if _, ok := m["api"]; !ok {
+		t.Error("api block must always be present (stats)")
+	}
+	if _, ok := m["stats"]; !ok {
+		t.Error("stats must always be present")
 	}
 	if _, ok := m["observatory"]; ok {
 		t.Error("no slots => no observatory")
+	}
+	// StatsService present, ObservatoryService absent without slots.
+	svcs := dig(t, m, "api", "services").([]any)
+	var hasStats, hasObs bool
+	for _, s := range svcs {
+		switch s {
+		case "StatsService":
+			hasStats = true
+		case "ObservatoryService":
+			hasObs = true
+		}
+	}
+	if !hasStats || hasObs {
+		t.Errorf("services = %v; want StatsService, no ObservatoryService", svcs)
 	}
 }

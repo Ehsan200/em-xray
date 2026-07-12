@@ -34,6 +34,9 @@ service Daemon {
   // Winner: the current fastest (balancer-selected) node per master.
   rpc Winners(Empty) returns (WinnersReply);
 
+  // Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
+  rpc Traffic(TrafficRequest) returns (TrafficReply);
+
   // Subscriptions (node pools consumed by masters via xraysub:NAME).
   rpc SubAdd(SubAddRequest) returns (SubReply);
   rpc SubList(Empty) returns (SubListReply);
@@ -70,6 +73,24 @@ message WinnerInfo {
   string tag = 3;  // slotN-out-<key>
 }
 message WinnersReply { repeated WinnerInfo winners = 1; }
+
+message TrafficRequest { int64 window_sec = 1; } // 0 => 24h
+message TrafficItem {
+  string kind = 1;  // inbound|outbound
+  string name = 2;
+  int64 total_up = 3;   // lifetime
+  int64 total_down = 4;
+  int64 window_up = 5;  // within the requested window
+  int64 window_down = 6;
+  repeated int64 hourly_up = 7;   // per-hour, oldest→newest, len == buckets
+  repeated int64 hourly_down = 8;
+}
+message TrafficReply {
+  repeated TrafficItem inbounds = 1;
+  repeated TrafficItem outbounds = 2;
+  int64 window_sec = 3;
+  int32 buckets = 4; // number of hourly buckets in each hourly_* array
+}
 
 message SubAddRequest {
   string name = 1;

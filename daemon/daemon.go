@@ -19,6 +19,25 @@ import (
 // sigTerm is the signal used to ask a child (and the daemon) to stop gracefully.
 var sigTerm = syscall.SIGTERM
 
+// pickAPIPort returns a free loopback port for xray's gRPC api, starting at the
+// default and scanning upward. This avoids a clash with another xray (e.g. the
+// user's em-wall) already holding the default. Falls back to the default if the
+// scan finds nothing free.
+func pickAPIPort(logger *log.Logger) int {
+	for port := xray.DefaultApiPort; port < xray.DefaultApiPort+64; port++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			continue
+		}
+		ln.Close()
+		if port != xray.DefaultApiPort {
+			logger.Printf("api port %d busy; using %d", xray.DefaultApiPort, port)
+		}
+		return port
+	}
+	return xray.DefaultApiPort
+}
+
 // Run is the daemon entrypoint (invoked by the detached `emx daemon run`). It
 // binds the control socket, serves gRPC, supervises the xray child, and blocks
 // until stopped by signal, context cancel, or the Shutdown RPC.
@@ -46,6 +65,10 @@ func Run(ctx context.Context) error {
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.Lmsgprefix)
 	logger.SetPrefix("[emx] ")
 
+	// Move xray's gRPC api port off a busy default (e.g. another xray already on
+	// 11932) so config generation + every `xray api` call agree on a free port.
+	xray.ApiPort = pickAPIPort(logger)
+
 	// Fresh socket: a stale file from a crash would make Listen fail.
 	_ = os.Remove(p.Socket())
 	lis, err := net.Listen("unix", p.Socket())
@@ -72,6 +95,9 @@ func Run(ctx context.Context) error {
 		logger.Printf("initial reconcile: %v", err)
 	}
 	fetcher.Start(ctx)
+
+	// Sample xray per-tag byte counters into hourly buckets for the traffic view.
+	NewTrafficSampler(store, sup, logger).Start(ctx)
 
 	stop := make(chan struct{})
 	srv := &Server{startTime: time.Now(), store: store, sup: sup, fetcher: fetcher, stop: stop}

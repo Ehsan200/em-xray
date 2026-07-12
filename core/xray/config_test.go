@@ -30,12 +30,16 @@ func TestGenerateEntriesAndInbounds(t *testing.T) {
 	}
 	m := genMap(t, entries, inbounds)
 
+	// in-sock plus the always-on api dokodemo inbound.
 	ins := m["inbounds"].([]any)
-	if len(ins) != 1 {
-		t.Fatalf("inbounds = %d, want 1", len(ins))
+	if len(ins) != 2 {
+		t.Fatalf("inbounds = %d, want 2 (in-sock + api)", len(ins))
 	}
 	if tag := dig(t, ins, 0, "tag"); tag != "in-sock" {
 		t.Errorf("inbound tag = %v", tag)
+	}
+	if tag := dig(t, ins, 1, "tag"); tag != ApiTag {
+		t.Errorf("second inbound should be api, got %v", tag)
 	}
 
 	outs := m["outbounds"].([]any)
@@ -47,9 +51,24 @@ func TestGenerateEntriesAndInbounds(t *testing.T) {
 		t.Errorf("direct/block must lead outbounds")
 	}
 
+	// api rule is prepended first; the user rule follows.
 	rules := dig(t, m, "routing", "rules").([]any)
-	if len(rules) != 1 || dig(t, rules, 0, "outboundTag") != "out-alpha" {
+	if len(rules) != 2 {
+		t.Fatalf("rules = %d, want 2 (api + in-sock)", len(rules))
+	}
+	if dig(t, rules, 0, "outboundTag") != ApiTag {
+		t.Errorf("api rule must be first, got %v", rules)
+	}
+	if dig(t, rules, 1, "outboundTag") != "out-alpha" {
 		t.Errorf("rule should route in-sock → out-alpha, got %v", rules)
+	}
+
+	// stats + traffic policy must always be present.
+	if _, ok := m["stats"]; !ok {
+		t.Error("stats must be enabled")
+	}
+	if dig(t, m, "policy", "system", "statsInboundUplink") != true {
+		t.Error("inbound traffic stats policy must be on")
 	}
 }
 

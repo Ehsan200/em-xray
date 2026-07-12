@@ -102,18 +102,27 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 		},
 	}
 
+	// Always emit the gRPC api inbound + stats + traffic policy so per-inbound
+	// and per-outbound byte counters are collected (the daemon samples them for
+	// the traffic charts). The api routing rule must be FIRST so a user
+	// catch-all can't swallow api traffic.
+	inboundsJSON = append(inboundsJSON, map[string]any{
+		"tag": ApiTag, "listen": "127.0.0.1", "port": ApiPort,
+		"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
+	})
+	rules = append([]any{map[string]any{
+		"type": "field", "inboundTag": []any{ApiTag}, "outboundTag": ApiTag,
+	}}, rules...)
+	services := []any{"HandlerService", "RoutingService", "StatsService"}
+	cfg["stats"] = map[string]any{}
+	cfg["policy"] = map[string]any{"system": map[string]any{
+		"statsInboundUplink": true, "statsInboundDownlink": true,
+		"statsOutboundUplink": true, "statsOutboundDownlink": true,
+	}}
+
 	var balancers []any
 	if len(sl) > 0 {
-		// gRPC api on a dokodemo inbound; its routing rule must be FIRST so a
-		// user catch-all can't swallow api traffic.
-		inboundsJSON = append(inboundsJSON, map[string]any{
-			"tag": ApiTag, "listen": "127.0.0.1", "port": ApiPort,
-			"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
-		})
-		rules = append([]any{map[string]any{
-			"type": "field", "inboundTag": []any{ApiTag}, "outboundTag": ApiTag,
-		}}, rules...)
-
+		services = append(services, "ObservatoryService")
 		for idx, s := range sl {
 			// slot socks inbound
 			inboundsJSON = append(inboundsJSON, map[string]any{
@@ -147,11 +156,6 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			})
 		}
 
-		cfg["api"] = map[string]any{
-			"tag":      ApiTag,
-			"services": []any{"HandlerService", "RoutingService", "ObservatoryService", "StatsService"},
-		}
-		cfg["stats"] = map[string]any{}
 		cfg["observatory"] = map[string]any{
 			"subjectSelector":   []any{ObservatorySelectorPrefix},
 			"probeURL":          DefaultProbeURL,
@@ -159,6 +163,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			"enableConcurrency": true,
 		}
 	}
+	cfg["api"] = map[string]any{"tag": ApiTag, "services": services}
 
 	routing := map[string]any{"rules": rules}
 	if len(balancers) > 0 {

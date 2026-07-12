@@ -14,9 +14,15 @@ const (
 	SlotCount     = 32
 	SlotPortEnd   = SlotPortStart + SlotCount - 1 // 11931
 
-	ApiPort = 11932 // gRPC api (dokodemo-door), only when a slot exists
-	ApiTag  = "api"
+	DefaultApiPort = 11932 // gRPC api (dokodemo-door) default
+	ApiTag         = "api"
 )
+
+// ApiPort is the loopback port for xray's gRPC api inbound. It's a var (not a
+// const) so the daemon can move it off a busy default — e.g. when another xray
+// (the user's em-wall) already holds 11932. Config generation and every
+// `xray api` call read this same value, so they stay consistent per process.
+var ApiPort = DefaultApiPort
 
 // AssignInboundPorts allocates a stable listen port to every enabled inbound
 // that lacks one (Port==0), choosing the lowest free port in [PortStart,PortEnd]

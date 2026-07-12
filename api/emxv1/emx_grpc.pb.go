@@ -37,6 +37,7 @@ const (
 	Daemon_InboundGetConfig_FullMethodName   = "/emx.v1.Daemon/InboundGetConfig"
 	Daemon_InboundSetConfig_FullMethodName   = "/emx.v1.Daemon/InboundSetConfig"
 	Daemon_Winners_FullMethodName            = "/emx.v1.Daemon/Winners"
+	Daemon_Traffic_FullMethodName            = "/emx.v1.Daemon/Traffic"
 	Daemon_SubAdd_FullMethodName             = "/emx.v1.Daemon/SubAdd"
 	Daemon_SubList_FullMethodName            = "/emx.v1.Daemon/SubList"
 	Daemon_SubRemove_FullMethodName          = "/emx.v1.Daemon/SubRemove"
@@ -77,6 +78,8 @@ type DaemonClient interface {
 	InboundSetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*InboundReply, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WinnersReply, error)
+	// Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
+	Traffic(ctx context.Context, in *TrafficRequest, opts ...grpc.CallOption) (*TrafficReply, error)
 	// Subscriptions (node pools consumed by masters via xraysub:NAME).
 	SubAdd(ctx context.Context, in *SubAddRequest, opts ...grpc.CallOption) (*SubReply, error)
 	SubList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SubListReply, error)
@@ -277,6 +280,16 @@ func (c *daemonClient) Winners(ctx context.Context, in *Empty, opts ...grpc.Call
 	return out, nil
 }
 
+func (c *daemonClient) Traffic(ctx context.Context, in *TrafficRequest, opts ...grpc.CallOption) (*TrafficReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrafficReply)
+	err := c.cc.Invoke(ctx, Daemon_Traffic_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) SubAdd(ctx context.Context, in *SubAddRequest, opts ...grpc.CallOption) (*SubReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SubReply)
@@ -396,6 +409,8 @@ type DaemonServer interface {
 	InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(context.Context, *Empty) (*WinnersReply, error)
+	// Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
+	Traffic(context.Context, *TrafficRequest) (*TrafficReply, error)
 	// Subscriptions (node pools consumed by masters via xraysub:NAME).
 	SubAdd(context.Context, *SubAddRequest) (*SubReply, error)
 	SubList(context.Context, *Empty) (*SubListReply, error)
@@ -469,6 +484,9 @@ func (UnimplementedDaemonServer) InboundSetConfig(context.Context, *SetConfigReq
 }
 func (UnimplementedDaemonServer) Winners(context.Context, *Empty) (*WinnersReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Winners not implemented")
+}
+func (UnimplementedDaemonServer) Traffic(context.Context, *TrafficRequest) (*TrafficReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Traffic not implemented")
 }
 func (UnimplementedDaemonServer) SubAdd(context.Context, *SubAddRequest) (*SubReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubAdd not implemented")
@@ -842,6 +860,24 @@ func _Daemon_Winners_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_Traffic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TrafficRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Traffic(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Traffic_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Traffic(ctx, req.(*TrafficRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_SubAdd_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SubAddRequest)
 	if err := dec(in); err != nil {
@@ -1082,6 +1118,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Winners",
 			Handler:    _Daemon_Winners_Handler,
+		},
+		{
+			MethodName: "Traffic",
+			Handler:    _Daemon_Traffic_Handler,
 		},
 		{
 			MethodName: "SubAdd",

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -59,6 +60,35 @@ func (s *Supervisor) apiRemoveOutbounds(tags ...string) error {
 		return fmt.Errorf("api rmo: %v: %s", err, out)
 	}
 	return nil
+}
+
+// StatsQuery reads all xray traffic counters (`statsquery`, no reset) and returns
+// them parsed. Counters are cumulative since the xray process started.
+func (s *Supervisor) StatsQuery() ([]xray.StatCounter, error) {
+	cmd, err := s.apiCmd("statsquery")
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("api statsquery: %w", err)
+	}
+	var payload struct {
+		Stat []struct {
+			Name  string `json:"name"`
+			Value any    `json:"value"`
+		} `json:"stat"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return nil, fmt.Errorf("parse statsquery: %w", err)
+	}
+	res := make([]xray.StatCounter, 0, len(payload.Stat))
+	for _, e := range payload.Stat {
+		if c, ok := xray.ParseStatName(e.Name, xray.StatValueToInt(e.Value)); ok {
+			res = append(res, c)
+		}
+	}
+	return res, nil
 }
 
 // BalancerInfoRaw returns the raw `xray api bi` text for the given balancer

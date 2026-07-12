@@ -50,11 +50,12 @@ func (s *menuSession) mainMenu() {
 			{"Inbounds", "server listeners you expose"},
 			{"Subscriptions", "node pools for masters"},
 			{"Entries", "outbounds & masters"},
+			{"Traffic", "per-inbound/outbound usage + charts"},
 			{"Templates", "view built-in inbound presets"},
 			{"Status", "daemon & xray health"},
 			{"Quit", ""},
 		})
-		if !ok || i == 5 {
+		if !ok || i == 6 {
 			return
 		}
 		switch i {
@@ -65,8 +66,10 @@ func (s *menuSession) mainMenu() {
 		case 2:
 			s.entriesMenu()
 		case 3:
-			s.templatesView()
+			s.trafficView()
 		case 4:
+			s.templatesView()
+		case 5:
 			s.statusView()
 		}
 	}
@@ -621,6 +624,39 @@ func (s *menuSession) pickDialer() string {
 }
 
 // ---- read-only views -------------------------------------------------------
+
+// trafficView lets the user pick a window, then prints the traffic chart above
+// the menu. Loops so windows can be switched without re-entering.
+func (s *menuSession) trafficView() {
+	windows := []struct {
+		label string
+		dur   time.Duration
+	}{
+		{"Last 24h", 24 * time.Hour},
+		{"Last 48h", 48 * time.Hour},
+		{"Last 7 days", 7 * 24 * time.Hour},
+		{"All time", 8 * 24 * time.Hour},
+	}
+	for {
+		items := make([]selectItem, len(windows)+1)
+		for i, w := range windows {
+			items[i] = selectItem{label: w.label}
+		}
+		items[len(items)-1] = selectItem{label: "← Back"}
+		i, ok := runSelect("Traffic — pick a window", items)
+		if !ok || i == len(items)-1 {
+			return
+		}
+		ctx, cancel := call()
+		reply, err := s.c.Traffic(ctx, &emxv1.TrafficRequest{WindowSec: int64(windows[i].dur.Seconds())})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+			return
+		}
+		fmt.Print("\n" + renderTraffic(reply) + "\n")
+	}
+}
 
 func (s *menuSession) templatesView() {
 	ctx, cancel := call()

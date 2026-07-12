@@ -35,7 +35,7 @@ func Open(dsn string) (*Store, error) {
 			return nil, err
 		}
 	}
-	if err := db.AutoMigrate(&Subscription{}, &SubNode{}, &SubNodeOverride{}, &XrayEntry{}, &Inbound{}); err != nil {
+	if err := db.AutoMigrate(&Subscription{}, &SubNode{}, &SubNodeOverride{}, &XrayEntry{}, &Inbound{}, &TrafficBucket{}, &TrafficTotal{}); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
