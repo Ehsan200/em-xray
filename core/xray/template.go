@@ -96,6 +96,10 @@ var templates = map[string]Template{
 		Protocol: "trojan", Network: "ws", Security: "tls", Listen: "0.0.0.0",
 		Path: "/",
 	},
+	"hysteria2": {
+		Name: "hysteria2", Description: "hysteria2 over QUIC + TLS (self-signed) — UDP, fast on lossy links",
+		Protocol: "hysteria", Network: "hysteria", Security: "tls", Listen: "0.0.0.0",
+	},
 	"socks": {
 		Name: "socks", Description: "local SOCKS5 proxy (loopback)",
 		Protocol: "socks", Network: "tcp", Security: "none", Listen: "127.0.0.1",
@@ -165,7 +169,11 @@ func NewInboundFromTemplate(name, templateName, target string) (*Inbound, error)
 // preserved, so it is safe to call after user overrides.
 func Materialize(in *Inbound) error {
 	if in.Network == "" {
-		in.Network = "tcp"
+		if in.Protocol == "hysteria" {
+			in.Network = "hysteria" // hysteria protocol requires its own transport
+		} else {
+			in.Network = "tcp"
+		}
 	}
 	if in.Listen == "" {
 		if in.Protocol == "socks" {
@@ -190,6 +198,14 @@ func Materialize(in *Inbound) error {
 				return err
 			}
 			in.Password = p
+		}
+	case "hysteria":
+		if in.HysteriaAuth == "" {
+			a, err := NewPassword()
+			if err != nil {
+				return err
+			}
+			in.HysteriaAuth = a
 		}
 	}
 	if in.Security == "reality" {

@@ -13,6 +13,7 @@ import (
 func ShareLinkForUser(in Inbound, host string, u InboundUser) string {
 	in.UUID = u.UUID
 	in.Password = u.Password
+	in.HysteriaAuth = u.Auth
 	in.Name = in.Name + "-" + u.Name
 	return ShareLink(in, host)
 }
@@ -82,6 +83,16 @@ func ShareLink(in Inbound, host string) string {
 		q.Set("type", orDefault(in.Network, "tcp"))
 		setTransportQuery(q, in)
 		return fmt.Sprintf("trojan://%s@%s:%s?%s#%s", in.Password, host, port, q.Encode(), url.QueryEscape(in.Name))
+
+	case "hysteria":
+		// hysteria2:// URI (sing-box / v2rayN / official client). Auth is the
+		// userinfo; insecure=1 because the server cert is self-signed.
+		q := url.Values{}
+		q.Set("insecure", "1")
+		if in.TLSSNI != "" {
+			q.Set("sni", in.TLSSNI)
+		}
+		return fmt.Sprintf("hysteria2://%s@%s:%s/?%s#%s", in.HysteriaAuth, host, port, q.Encode(), url.QueryEscape(in.Name))
 
 	default:
 		return ""

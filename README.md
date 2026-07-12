@@ -5,7 +5,7 @@ into a **master dialer with subscription-backed node pools**: subscription URLs 
 of nodes, and a "master" outbound tunnels its own server connection through **whichever node in the
 pool is currently fastest** — with **zero xray restarts** on node churn.
 
-It also runs as a **server**: expose a `vless` / `vmess` / `trojan` / `socks` listener (keys +
+It also runs as a **server**: expose a `vless` / `vmess` / `trojan` / `hysteria2` / `socks` listener (keys +
 self-signed TLS certs auto-generated, client share-link + QR printed) whose traffic egresses through a
 master's fastest node — with **per-user accounts, byte quotas, and live traffic charts**.
 
@@ -22,8 +22,8 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
   balancer picks the winner. Nodes never listen on ports; they're outbounds ranked by live latency.
 - **Zero-restart churn** — a subscription refresh, node enable/disable, or cap change updates the
   live pool over xray's gRPC API (`ado`/`rmo`), never restarting xray or dropping connections.
-- **Server mode** — create an inbound from 14 built-in templates (vless/vmess/trojan × reality/TLS ×
-  tcp/ws/grpc/xhttp/httpupgrade) with one command; UUID, REALITY keypair, and **self-signed TLS
+- **Server mode** — create an inbound from 15 built-in templates (vless/vmess/trojan × reality/TLS ×
+  tcp/ws/grpc/xhttp/httpupgrade, plus hysteria2/QUIC) with one command; UUID, REALITY keypair, and **self-signed TLS
   certs** (via `xray tls cert`, no domain needed) are auto-generated and the client share-link + a
   scannable **QR code** are printed.
 - **Multi-user + quotas** — add many client accounts to one listener, each with its own UUID/link and
@@ -150,7 +150,7 @@ The running daemon also checks for new releases every 6h and flags it in `emx st
 | **Master** | An entry with a `Dialer`. Its transport tunnels through a node pool via `dialerProxy`. |
 | **Subscription** | A remote URL yielding a volatile pool of nodes. Never a route target by itself — consumed only inside a master's dialer. |
 | **Node** | One member of a subscription pool. Ranked fastest-first by the observatory. Never listens on a port. |
-| **Inbound** | A server listener (`vless`/`vmess`/`socks`/`trojan`) you expose, routed to a **Target**. |
+| **Inbound** | A server listener (`vless`/`vmess`/`socks`/`trojan`/`hysteria`) you expose, routed to a **Target**. |
 | **User** | An extra client on an inbound — its own credential/link, per-user traffic, and an optional byte cap. The inbound's own key is the primary client. |
 | **Target** | Where an inbound egresses: `master:NAME` (fastest node) · `xray:NAME` (one entry) · `direct`. |
 
@@ -230,6 +230,7 @@ live list.
 | `vmess-tls-ws` | websocket | self-signed TLS |
 | `trojan-tls` | tcp | self-signed TLS |
 | `trojan-tls-ws` | websocket | self-signed TLS |
+| `hysteria2` | hysteria (QUIC) | self-signed TLS — UDP, fast on lossy links |
 | `socks` | tcp (loopback) | none — local proxy |
 
 ---

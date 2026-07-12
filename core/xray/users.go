@@ -44,6 +44,12 @@ func NewInboundUser(in *Inbound, name string, capBytes int64) (*InboundUser, err
 			return nil, err
 		}
 		u.Password = p
+	case "hysteria":
+		a, err := NewPassword()
+		if err != nil {
+			return nil, err
+		}
+		u.Auth = a
 	default:
 		return nil, fmt.Errorf("protocol %q does not support extra users", in.Protocol)
 	}

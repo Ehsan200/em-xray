@@ -106,15 +106,17 @@ func (e XrayEntry) IsMaster() bool { return strings.TrimSpace(e.Dialer) != "" }
 type Inbound struct {
 	ID       uint   `gorm:"primaryKey"`
 	Name     string `gorm:"uniqueIndex;not null"`
-	Protocol string `gorm:"not null"` // vless|vmess|socks|trojan
+	Protocol string `gorm:"not null"` // vless|vmess|socks|trojan|hysteria
 	Listen   string // default per protocol (0.0.0.0 for servers, 127.0.0.1 for socks)
 	Port     int    // 0 => auto-assign from [PortStart,PortEnd]
 	Enabled  bool   `gorm:"default:true"`
 
-	// Credential (auto-generated): UUID for vless/vmess, Password for trojan.
-	UUID     string
-	Password string
-	Flow     string // vless flow, e.g. xtls-rprx-vision
+	// Credential (auto-generated): UUID for vless/vmess, Password for trojan,
+	// HysteriaAuth for hysteria.
+	UUID         string
+	Password     string
+	HysteriaAuth string // hysteria2 auth string (primary client)
+	Flow         string // vless flow, e.g. xtls-rprx-vision
 
 	// Transport + security.
 	Network  string // tcp|ws|grpc|xhttp (default tcp)
@@ -161,6 +163,7 @@ type InboundUser struct {
 	Name      string `gorm:"index:idx_user_inbound,unique,priority:2;not null"`
 	UUID      string // vless/vmess
 	Password  string // trojan
+	Auth      string // hysteria2
 	Email     string `gorm:"index;not null"` // stats tag: user>>>EMAIL>>>traffic>>>...
 	ByteCap   int64  // 0 = unlimited; else deny once up+down reaches it
 	Enabled   bool   `gorm:"default:true"`

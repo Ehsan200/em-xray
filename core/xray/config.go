@@ -239,6 +239,11 @@ func buildInbound(in Inbound) (map[string]any, error) {
 		ib["settings"] = map[string]any{"clients": inboundClients(in)}
 	case "trojan":
 		ib["settings"] = map[string]any{"clients": inboundClients(in)}
+	case "hysteria":
+		// hysteria is a QUIC transport carrying its own protocol: auth-based
+		// users live in settings.users; the transport params (version, primary
+		// auth, masquerade) live in streamSettings.hysteriaSettings below.
+		ib["settings"] = map[string]any{"version": 2, "users": hysteriaUsers(in)}
 	default:
 		return nil, fmt.Errorf("unsupported inbound protocol %q", in.Protocol)
 	}
@@ -264,6 +269,18 @@ func inboundClients(in Inbound) []any {
 		clients = append(clients, clientObject(in.Protocol, u.UUID, u.Password, u.Email, in.Flow))
 	}
 	return clients
+}
+
+// hysteriaUsers builds the settings.users array for a hysteria inbound: the
+// primary credential plus every extra user, each an auth string with a level-0
+// stats email so xray reports per-user byte counters. The daemon has already
+// dropped over-quota users.
+func hysteriaUsers(in Inbound) []any {
+	users := []any{map[string]any{"auth": in.HysteriaAuth, "email": PrimaryUserEmail(in.Name), "level": 0}}
+	for _, u := range in.Users {
+		users = append(users, map[string]any{"auth": u.Auth, "email": u.Email, "level": 0})
+	}
+	return users
 }
 
 // clientObject builds one client entry for the given protocol.
@@ -349,6 +366,16 @@ func buildInboundStream(in Inbound) (map[string]any, error) {
 		ss["xhttpSettings"] = x
 	case "grpc":
 		ss["grpcSettings"] = map[string]any{"serviceName": in.Path}
+	case "hysteria":
+		// version+auth are the transport-level params; auth is the primary
+		// credential (overridden per-client by settings.users). masquerade is
+		// omitted → xray serves its default 404 page. udpIdleTimeout left at the
+		// xray default (60s).
+		hy := map[string]any{"version": 2}
+		if in.HysteriaAuth != "" {
+			hy["auth"] = in.HysteriaAuth
+		}
+		ss["hysteriaSettings"] = hy
 	}
 	return ss, nil
 }
