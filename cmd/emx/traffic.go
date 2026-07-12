@@ -37,7 +37,34 @@ func trafficCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&window, "window", "24h", "chart window: a duration (24h, 48h), '7d', or 'all'")
+	c.AddCommand(trafficRetentionCmd())
 	return c
+}
+
+// trafficRetentionCmd reads or sets how many days of hourly buckets are kept.
+func trafficRetentionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "retention [days]", Short: "show or set how many days of traffic history to keep",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := &emxv1.TrafficRetentionRequest{}
+			if len(args) == 1 {
+				d, err := strconv.Atoi(args[0])
+				if err != nil || d < 1 {
+					return fmt.Errorf("days must be a positive integer")
+				}
+				req.SetDays, req.Change = int32(d), true
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.TrafficRetention(ctx, req)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "traffic history kept: %d days\n", reply.Days)
+				return nil
+			})
+		},
+	}
 }
 
 func speedCmd() *cobra.Command {

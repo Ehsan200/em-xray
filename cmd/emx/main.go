@@ -50,6 +50,8 @@ func rootCmd() *cobra.Command {
 		trafficCmd(),
 		speedCmd(),
 		configCmd(),
+		xrayCmd(),
+		loglevelCmd(),
 		updateCmd(),
 		systemdCmd(),
 		uiCmd(),

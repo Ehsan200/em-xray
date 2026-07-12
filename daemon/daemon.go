@@ -98,6 +98,8 @@ func Run(ctx context.Context) error {
 
 	// Sample xray per-tag byte counters into hourly buckets for the traffic view.
 	NewTrafficSampler(store, sup, logger).Start(ctx)
+	// Keep xray's logs from filling the disk (rolls past the configured cap).
+	NewLogRotator(store, p, logger).Start(ctx)
 
 	stop := make(chan struct{})
 	srv := &Server{startTime: time.Now(), store: store, sup: sup, fetcher: fetcher, stop: stop}

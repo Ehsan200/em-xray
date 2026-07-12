@@ -182,8 +182,8 @@ func (s *Server) Traffic(ctx context.Context, req *emxv1.TrafficRequest) (*emxv1
 	if window <= 0 {
 		window = 24 * time.Hour
 	}
-	if window > xray.TrafficRetention {
-		window = xray.TrafficRetention
+	if maxWindow := time.Duration(s.store.TrafficDays()) * 24 * time.Hour; window > maxWindow {
+		window = maxWindow
 	}
 	buckets := int(window / time.Hour)
 	if buckets < 1 {

@@ -191,8 +191,15 @@ emx in user rm <user-id> | enable <user-id> | disable <user-id>
 emx in user qr <inbound-id> <user-name>     a user's link as a QR code
 
 emx traffic [--window 24h|7d|all]           per-inbound/outbound charts (totals + sparkline)
+emx traffic retention [days]                how long to keep hourly history (default 8)
 emx speed                                   live ↑/↓ throughput; Ctrl-C to stop
 emx config export [-o file] | import <file> [--replace]   backup / restore all config
+
+emx xray config                             print the generated xray config.json
+emx xray logs [-a] [-n N] [-f]              tail xray's error (or --access) log
+emx xray logcap [MB]                        per-file log size cap (0 disables; default 50)
+emx xray paths                              show the XDG paths in use
+emx loglevel [debug|info|warning|error|none]   show or change the xray log level
 
 emx template ls                             built-in inbound presets
 emx winner                                  current fastest node per master
@@ -252,6 +259,15 @@ daemon samples the cumulative byte counters once a minute, diffs them (reset-saf
 restarts), and stores hourly buckets + lifetime totals in sqlite — that feeds `emx traffic`, the
 per-user usage, and byte-cap enforcement. The gRPC api binds a loopback port starting at `11932`,
 **auto-advancing** if it's taken (so it never clashes with another xray on the same host).
+
+### Disk usage is bounded
+
+- **Logs** — xray's access/error logs are capped (`emx xray logcap`, default **50 MB** each). Past the
+  cap the file is rolled to `*.prev` and truncated in place — xray keeps writing, no restart. Peak per
+  log is ~2× the cap. Set `0` to disable rotation.
+- **Traffic metadata** — hourly buckets are pruned to a rolling window (`emx traffic retention`,
+  default **8 days**); lifetime totals are a single row per inbound/outbound/user. Subscription nodes
+  are volatile (replaced each fetch, capped by the sub's node cap). Nothing grows unbounded.
 
 ### Paths (XDG)
 

@@ -22,6 +22,9 @@ const (
 	Daemon_Ping_FullMethodName                  = "/emx.v1.Daemon/Ping"
 	Daemon_Status_FullMethodName                = "/emx.v1.Daemon/Status"
 	Daemon_Shutdown_FullMethodName              = "/emx.v1.Daemon/Shutdown"
+	Daemon_XrayConfig_FullMethodName            = "/emx.v1.Daemon/XrayConfig"
+	Daemon_LogLevel_FullMethodName              = "/emx.v1.Daemon/LogLevel"
+	Daemon_LogCap_FullMethodName                = "/emx.v1.Daemon/LogCap"
 	Daemon_TemplateList_FullMethodName          = "/emx.v1.Daemon/TemplateList"
 	Daemon_EntryAdd_FullMethodName              = "/emx.v1.Daemon/EntryAdd"
 	Daemon_EntryList_FullMethodName             = "/emx.v1.Daemon/EntryList"
@@ -43,6 +46,7 @@ const (
 	Daemon_Winners_FullMethodName               = "/emx.v1.Daemon/Winners"
 	Daemon_Traffic_FullMethodName               = "/emx.v1.Daemon/Traffic"
 	Daemon_TrafficLive_FullMethodName           = "/emx.v1.Daemon/TrafficLive"
+	Daemon_TrafficRetention_FullMethodName      = "/emx.v1.Daemon/TrafficRetention"
 	Daemon_ExportConfig_FullMethodName          = "/emx.v1.Daemon/ExportConfig"
 	Daemon_ImportConfig_FullMethodName          = "/emx.v1.Daemon/ImportConfig"
 	Daemon_SubAdd_FullMethodName                = "/emx.v1.Daemon/SubAdd"
@@ -66,6 +70,10 @@ type DaemonClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingReply, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusReply, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownReply, error)
+	// Diagnostics / settings.
+	XrayConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error)
+	LogLevel(ctx context.Context, in *LogLevelRequest, opts ...grpc.CallOption) (*LogLevelReply, error)
+	LogCap(ctx context.Context, in *LogCapRequest, opts ...grpc.CallOption) (*LogCapReply, error)
 	// Templates.
 	TemplateList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*TemplateListReply, error)
 	// Entries (outbounds; a non-empty dialer makes one a master).
@@ -94,6 +102,8 @@ type DaemonClient interface {
 	Traffic(ctx context.Context, in *TrafficRequest, opts ...grpc.CallOption) (*TrafficReply, error)
 	// TrafficLive: current cumulative counters, for a client-computed live rate.
 	TrafficLive(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*TrafficLiveReply, error)
+	// TrafficRetention: read/set how many days of hourly buckets are kept.
+	TrafficRetention(ctx context.Context, in *TrafficRetentionRequest, opts ...grpc.CallOption) (*TrafficRetentionReply, error)
 	// Backup / restore the full config (inbounds + entries + subscriptions).
 	ExportConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error)
 	ImportConfig(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error)
@@ -141,6 +151,36 @@ func (c *daemonClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts .
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ShutdownReply)
 	err := c.cc.Invoke(ctx, Daemon_Shutdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) XrayConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigReply)
+	err := c.cc.Invoke(ctx, Daemon_XrayConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) LogLevel(ctx context.Context, in *LogLevelRequest, opts ...grpc.CallOption) (*LogLevelReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogLevelReply)
+	err := c.cc.Invoke(ctx, Daemon_LogLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) LogCap(ctx context.Context, in *LogCapRequest, opts ...grpc.CallOption) (*LogCapReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogCapReply)
+	err := c.cc.Invoke(ctx, Daemon_LogCap_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +397,16 @@ func (c *daemonClient) TrafficLive(ctx context.Context, in *Empty, opts ...grpc.
 	return out, nil
 }
 
+func (c *daemonClient) TrafficRetention(ctx context.Context, in *TrafficRetentionRequest, opts ...grpc.CallOption) (*TrafficRetentionReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrafficRetentionReply)
+	err := c.cc.Invoke(ctx, Daemon_TrafficRetention_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) ExportConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConfigReply)
@@ -477,6 +527,10 @@ type DaemonServer interface {
 	Ping(context.Context, *PingRequest) (*PingReply, error)
 	Status(context.Context, *StatusRequest) (*StatusReply, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownReply, error)
+	// Diagnostics / settings.
+	XrayConfig(context.Context, *Empty) (*ConfigReply, error)
+	LogLevel(context.Context, *LogLevelRequest) (*LogLevelReply, error)
+	LogCap(context.Context, *LogCapRequest) (*LogCapReply, error)
 	// Templates.
 	TemplateList(context.Context, *Empty) (*TemplateListReply, error)
 	// Entries (outbounds; a non-empty dialer makes one a master).
@@ -505,6 +559,8 @@ type DaemonServer interface {
 	Traffic(context.Context, *TrafficRequest) (*TrafficReply, error)
 	// TrafficLive: current cumulative counters, for a client-computed live rate.
 	TrafficLive(context.Context, *Empty) (*TrafficLiveReply, error)
+	// TrafficRetention: read/set how many days of hourly buckets are kept.
+	TrafficRetention(context.Context, *TrafficRetentionRequest) (*TrafficRetentionReply, error)
 	// Backup / restore the full config (inbounds + entries + subscriptions).
 	ExportConfig(context.Context, *Empty) (*ConfigReply, error)
 	ImportConfig(context.Context, *ImportRequest) (*ImportReply, error)
@@ -536,6 +592,15 @@ func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*Statu
 }
 func (UnimplementedDaemonServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedDaemonServer) XrayConfig(context.Context, *Empty) (*ConfigReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method XrayConfig not implemented")
+}
+func (UnimplementedDaemonServer) LogLevel(context.Context, *LogLevelRequest) (*LogLevelReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LogLevel not implemented")
+}
+func (UnimplementedDaemonServer) LogCap(context.Context, *LogCapRequest) (*LogCapReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LogCap not implemented")
 }
 func (UnimplementedDaemonServer) TemplateList(context.Context, *Empty) (*TemplateListReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TemplateList not implemented")
@@ -599,6 +664,9 @@ func (UnimplementedDaemonServer) Traffic(context.Context, *TrafficRequest) (*Tra
 }
 func (UnimplementedDaemonServer) TrafficLive(context.Context, *Empty) (*TrafficLiveReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TrafficLive not implemented")
+}
+func (UnimplementedDaemonServer) TrafficRetention(context.Context, *TrafficRetentionRequest) (*TrafficRetentionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TrafficRetention not implemented")
 }
 func (UnimplementedDaemonServer) ExportConfig(context.Context, *Empty) (*ConfigReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ExportConfig not implemented")
@@ -704,6 +772,60 @@ func _Daemon_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).Shutdown(ctx, req.(*ShutdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_XrayConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).XrayConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_XrayConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).XrayConfig(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_LogLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).LogLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_LogLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).LogLevel(ctx, req.(*LogLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_LogCap_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogCapRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).LogCap(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_LogCap_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).LogCap(ctx, req.(*LogCapRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1086,6 +1208,24 @@ func _Daemon_TrafficLive_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_TrafficRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TrafficRetentionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).TrafficRetention(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_TrafficRetention_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).TrafficRetention(ctx, req.(*TrafficRetentionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_ExportConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Empty)
 	if err := dec(in); err != nil {
@@ -1304,6 +1444,18 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_Shutdown_Handler,
 		},
 		{
+			MethodName: "XrayConfig",
+			Handler:    _Daemon_XrayConfig_Handler,
+		},
+		{
+			MethodName: "LogLevel",
+			Handler:    _Daemon_LogLevel_Handler,
+		},
+		{
+			MethodName: "LogCap",
+			Handler:    _Daemon_LogCap_Handler,
+		},
+		{
 			MethodName: "TemplateList",
 			Handler:    _Daemon_TemplateList_Handler,
 		},
@@ -1386,6 +1538,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TrafficLive",
 			Handler:    _Daemon_TrafficLive_Handler,
+		},
+		{
+			MethodName: "TrafficRetention",
+			Handler:    _Daemon_TrafficRetention_Handler,
 		},
 		{
 			MethodName: "ExportConfig",

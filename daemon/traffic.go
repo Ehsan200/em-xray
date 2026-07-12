@@ -99,9 +99,10 @@ func (t *TrafficSampler) poll() {
 
 	t.enforceCaps()
 
-	// Prune stale buckets once per hour.
+	// Prune stale buckets once per hour, per the configured retention.
 	if hour != t.lastPrune {
-		cut := xray.HourFloor(time.Now().Add(-xray.TrafficRetention))
+		retention := time.Duration(t.store.TrafficDays()) * 24 * time.Hour
+		cut := xray.HourFloor(time.Now().Add(-retention))
 		if err := t.store.PruneTrafficBefore(cut); err != nil {
 			t.log.Printf("traffic: prune failed: %v", err)
 		}

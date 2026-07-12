@@ -11,6 +11,11 @@ service Daemon {
   rpc Status(StatusRequest) returns (StatusReply);
   rpc Shutdown(ShutdownRequest) returns (ShutdownReply);
 
+  // Diagnostics / settings.
+  rpc XrayConfig(Empty) returns (ConfigReply);        // the generated xray config.json
+  rpc LogLevel(LogLevelRequest) returns (LogLevelReply); // set (non-empty) and/or read
+  rpc LogCap(LogCapRequest) returns (LogCapReply);       // per-file log size cap (MB)
+
   // Templates.
   rpc TemplateList(Empty) returns (TemplateListReply);
 
@@ -44,6 +49,8 @@ service Daemon {
   rpc Traffic(TrafficRequest) returns (TrafficReply);
   // TrafficLive: current cumulative counters, for a client-computed live rate.
   rpc TrafficLive(Empty) returns (TrafficLiveReply);
+  // TrafficRetention: read/set how many days of hourly buckets are kept.
+  rpc TrafficRetention(TrafficRetentionRequest) returns (TrafficRetentionReply);
 
   // Backup / restore the full config (inbounds + entries + subscriptions).
   rpc ExportConfig(Empty) returns (ConfigReply);
@@ -111,6 +118,14 @@ message LiveItem {
   int64 down = 4;
 }
 message TrafficLiveReply { repeated LiveItem items = 1; }
+
+// TrafficRetentionRequest sets the retention (days ≥ 1) when change=true; always
+// returns the current value.
+message TrafficRetentionRequest {
+  int32 set_days = 1;
+  bool change = 2;
+}
+message TrafficRetentionReply { int32 days = 1; }
 
 message SubAddRequest {
   string name = 1;
@@ -213,6 +228,19 @@ message XrayState {
 
 message ShutdownRequest {}
 message ShutdownReply {}
+
+// LogLevelRequest sets the xray log level when set is non-empty; always returns
+// the current level. Valid: debug|info|warning|error|none.
+message LogLevelRequest { string set = 1; }
+message LogLevelReply { string level = 1; }
+
+// LogCapRequest changes the per-file log cap (MB) when change=true (0 disables
+// rotation); always returns the current cap. Peak on-disk per log is ~2× cap.
+message LogCapRequest {
+  int32 set_mb = 1;
+  bool change = 2;
+}
+message LogCapReply { int32 mb = 1; }
 
 message Template {
   string name = 1;

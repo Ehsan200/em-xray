@@ -622,6 +622,104 @@ func (x *TrafficLiveReply) GetItems() []*LiveItem {
 	return nil
 }
 
+// TrafficRetentionRequest sets the retention (days ≥ 1) when change=true; always
+// returns the current value.
+type TrafficRetentionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SetDays       int32                  `protobuf:"varint,1,opt,name=set_days,json=setDays,proto3" json:"set_days,omitempty"`
+	Change        bool                   `protobuf:"varint,2,opt,name=change,proto3" json:"change,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrafficRetentionRequest) Reset() {
+	*x = TrafficRetentionRequest{}
+	mi := &file_emx_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrafficRetentionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrafficRetentionRequest) ProtoMessage() {}
+
+func (x *TrafficRetentionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_emx_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrafficRetentionRequest.ProtoReflect.Descriptor instead.
+func (*TrafficRetentionRequest) Descriptor() ([]byte, []int) {
+	return file_emx_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TrafficRetentionRequest) GetSetDays() int32 {
+	if x != nil {
+		return x.SetDays
+	}
+	return 0
+}
+
+func (x *TrafficRetentionRequest) GetChange() bool {
+	if x != nil {
+		return x.Change
+	}
+	return false
+}
+
+type TrafficRetentionReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Days          int32                  `protobuf:"varint,1,opt,name=days,proto3" json:"days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrafficRetentionReply) Reset() {
+	*x = TrafficRetentionReply{}
+	mi := &file_emx_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrafficRetentionReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrafficRetentionReply) ProtoMessage() {}
+
+func (x *TrafficRetentionReply) ProtoReflect() protoreflect.Message {
+	mi := &file_emx_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrafficRetentionReply.ProtoReflect.Descriptor instead.
+func (*TrafficRetentionReply) Descriptor() ([]byte, []int) {
+	return file_emx_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *TrafficRetentionReply) GetDays() int32 {
+	if x != nil {
+		return x.Days
+	}
+	return 0
+}
+
 type SubAddRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -635,7 +733,7 @@ type SubAddRequest struct {
 
 func (x *SubAddRequest) Reset() {
 	*x = SubAddRequest{}
-	mi := &file_emx_proto_msgTypes[10]
+	mi := &file_emx_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -647,7 +745,7 @@ func (x *SubAddRequest) String() string {
 func (*SubAddRequest) ProtoMessage() {}
 
 func (x *SubAddRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[10]
+	mi := &file_emx_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -660,7 +758,7 @@ func (x *SubAddRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubAddRequest.ProtoReflect.Descriptor instead.
 func (*SubAddRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{10}
+	return file_emx_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SubAddRequest) GetName() string {
@@ -721,7 +819,7 @@ type SubInfo struct {
 
 func (x *SubInfo) Reset() {
 	*x = SubInfo{}
-	mi := &file_emx_proto_msgTypes[11]
+	mi := &file_emx_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -733,7 +831,7 @@ func (x *SubInfo) String() string {
 func (*SubInfo) ProtoMessage() {}
 
 func (x *SubInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[11]
+	mi := &file_emx_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -746,7 +844,7 @@ func (x *SubInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubInfo.ProtoReflect.Descriptor instead.
 func (*SubInfo) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{11}
+	return file_emx_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SubInfo) GetId() uint32 {
@@ -863,7 +961,7 @@ type SubReply struct {
 
 func (x *SubReply) Reset() {
 	*x = SubReply{}
-	mi := &file_emx_proto_msgTypes[12]
+	mi := &file_emx_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +973,7 @@ func (x *SubReply) String() string {
 func (*SubReply) ProtoMessage() {}
 
 func (x *SubReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[12]
+	mi := &file_emx_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +986,7 @@ func (x *SubReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubReply.ProtoReflect.Descriptor instead.
 func (*SubReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{12}
+	return file_emx_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SubReply) GetSub() *SubInfo {
@@ -907,7 +1005,7 @@ type SubListReply struct {
 
 func (x *SubListReply) Reset() {
 	*x = SubListReply{}
-	mi := &file_emx_proto_msgTypes[13]
+	mi := &file_emx_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -919,7 +1017,7 @@ func (x *SubListReply) String() string {
 func (*SubListReply) ProtoMessage() {}
 
 func (x *SubListReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[13]
+	mi := &file_emx_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -932,7 +1030,7 @@ func (x *SubListReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubListReply.ProtoReflect.Descriptor instead.
 func (*SubListReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{13}
+	return file_emx_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SubListReply) GetSubs() []*SubInfo {
@@ -951,7 +1049,7 @@ type SubRefreshRequest struct {
 
 func (x *SubRefreshRequest) Reset() {
 	*x = SubRefreshRequest{}
-	mi := &file_emx_proto_msgTypes[14]
+	mi := &file_emx_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -963,7 +1061,7 @@ func (x *SubRefreshRequest) String() string {
 func (*SubRefreshRequest) ProtoMessage() {}
 
 func (x *SubRefreshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[14]
+	mi := &file_emx_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -976,7 +1074,7 @@ func (x *SubRefreshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubRefreshRequest.ProtoReflect.Descriptor instead.
 func (*SubRefreshRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{14}
+	return file_emx_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SubRefreshRequest) GetId() uint32 {
@@ -997,7 +1095,7 @@ type SubRefreshReply struct {
 
 func (x *SubRefreshReply) Reset() {
 	*x = SubRefreshReply{}
-	mi := &file_emx_proto_msgTypes[15]
+	mi := &file_emx_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1107,7 @@ func (x *SubRefreshReply) String() string {
 func (*SubRefreshReply) ProtoMessage() {}
 
 func (x *SubRefreshReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[15]
+	mi := &file_emx_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1120,7 @@ func (x *SubRefreshReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubRefreshReply.ProtoReflect.Descriptor instead.
 func (*SubRefreshReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{15}
+	return file_emx_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SubRefreshReply) GetNodes() int32 {
@@ -1059,7 +1157,7 @@ type NodeInfo struct {
 
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
-	mi := &file_emx_proto_msgTypes[16]
+	mi := &file_emx_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1071,7 +1169,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[16]
+	mi := &file_emx_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1084,7 +1182,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{16}
+	return file_emx_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NodeInfo) GetFingerprint() string {
@@ -1131,7 +1229,7 @@ type SubNodesReply struct {
 
 func (x *SubNodesReply) Reset() {
 	*x = SubNodesReply{}
-	mi := &file_emx_proto_msgTypes[17]
+	mi := &file_emx_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1143,7 +1241,7 @@ func (x *SubNodesReply) String() string {
 func (*SubNodesReply) ProtoMessage() {}
 
 func (x *SubNodesReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[17]
+	mi := &file_emx_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1156,7 +1254,7 @@ func (x *SubNodesReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubNodesReply.ProtoReflect.Descriptor instead.
 func (*SubNodesReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{17}
+	return file_emx_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SubNodesReply) GetNodes() []*NodeInfo {
@@ -1177,7 +1275,7 @@ type SubNodeDisabledRequest struct {
 
 func (x *SubNodeDisabledRequest) Reset() {
 	*x = SubNodeDisabledRequest{}
-	mi := &file_emx_proto_msgTypes[18]
+	mi := &file_emx_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1189,7 +1287,7 @@ func (x *SubNodeDisabledRequest) String() string {
 func (*SubNodeDisabledRequest) ProtoMessage() {}
 
 func (x *SubNodeDisabledRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[18]
+	mi := &file_emx_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1202,7 +1300,7 @@ func (x *SubNodeDisabledRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubNodeDisabledRequest.ProtoReflect.Descriptor instead.
 func (*SubNodeDisabledRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{18}
+	return file_emx_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SubNodeDisabledRequest) GetSubId() uint32 {
@@ -1234,7 +1332,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_emx_proto_msgTypes[19]
+	mi := &file_emx_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1246,7 +1344,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[19]
+	mi := &file_emx_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1259,7 +1357,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{19}
+	return file_emx_proto_rawDescGZIP(), []int{21}
 }
 
 type IdRequest struct {
@@ -1271,7 +1369,7 @@ type IdRequest struct {
 
 func (x *IdRequest) Reset() {
 	*x = IdRequest{}
-	mi := &file_emx_proto_msgTypes[20]
+	mi := &file_emx_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1283,7 +1381,7 @@ func (x *IdRequest) String() string {
 func (*IdRequest) ProtoMessage() {}
 
 func (x *IdRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[20]
+	mi := &file_emx_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1296,7 +1394,7 @@ func (x *IdRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdRequest.ProtoReflect.Descriptor instead.
 func (*IdRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{20}
+	return file_emx_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *IdRequest) GetId() uint32 {
@@ -1317,7 +1415,7 @@ type DuplicateRequest struct {
 
 func (x *DuplicateRequest) Reset() {
 	*x = DuplicateRequest{}
-	mi := &file_emx_proto_msgTypes[21]
+	mi := &file_emx_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1329,7 +1427,7 @@ func (x *DuplicateRequest) String() string {
 func (*DuplicateRequest) ProtoMessage() {}
 
 func (x *DuplicateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[21]
+	mi := &file_emx_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1342,7 +1440,7 @@ func (x *DuplicateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DuplicateRequest.ProtoReflect.Descriptor instead.
 func (*DuplicateRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{21}
+	return file_emx_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DuplicateRequest) GetId() uint32 {
@@ -1369,7 +1467,7 @@ type ConfigReply struct {
 
 func (x *ConfigReply) Reset() {
 	*x = ConfigReply{}
-	mi := &file_emx_proto_msgTypes[22]
+	mi := &file_emx_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1479,7 @@ func (x *ConfigReply) String() string {
 func (*ConfigReply) ProtoMessage() {}
 
 func (x *ConfigReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[22]
+	mi := &file_emx_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1492,7 @@ func (x *ConfigReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigReply.ProtoReflect.Descriptor instead.
 func (*ConfigReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{22}
+	return file_emx_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ConfigReply) GetJson() string {
@@ -1415,7 +1513,7 @@ type SetConfigRequest struct {
 
 func (x *SetConfigRequest) Reset() {
 	*x = SetConfigRequest{}
-	mi := &file_emx_proto_msgTypes[23]
+	mi := &file_emx_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1427,7 +1525,7 @@ func (x *SetConfigRequest) String() string {
 func (*SetConfigRequest) ProtoMessage() {}
 
 func (x *SetConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[23]
+	mi := &file_emx_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1440,7 +1538,7 @@ func (x *SetConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetConfigRequest.ProtoReflect.Descriptor instead.
 func (*SetConfigRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{23}
+	return file_emx_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SetConfigRequest) GetId() uint32 {
@@ -1469,7 +1567,7 @@ type ImportRequest struct {
 
 func (x *ImportRequest) Reset() {
 	*x = ImportRequest{}
-	mi := &file_emx_proto_msgTypes[24]
+	mi := &file_emx_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1481,7 +1579,7 @@ func (x *ImportRequest) String() string {
 func (*ImportRequest) ProtoMessage() {}
 
 func (x *ImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[24]
+	mi := &file_emx_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1494,7 +1592,7 @@ func (x *ImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRequest.ProtoReflect.Descriptor instead.
 func (*ImportRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{24}
+	return file_emx_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ImportRequest) GetJson() string {
@@ -1523,7 +1621,7 @@ type ImportReply struct {
 
 func (x *ImportReply) Reset() {
 	*x = ImportReply{}
-	mi := &file_emx_proto_msgTypes[25]
+	mi := &file_emx_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1535,7 +1633,7 @@ func (x *ImportReply) String() string {
 func (*ImportReply) ProtoMessage() {}
 
 func (x *ImportReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[25]
+	mi := &file_emx_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1548,7 +1646,7 @@ func (x *ImportReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportReply.ProtoReflect.Descriptor instead.
 func (*ImportReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{25}
+	return file_emx_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ImportReply) GetInbounds() int32 {
@@ -1587,7 +1685,7 @@ type PingRequest struct {
 
 func (x *PingRequest) Reset() {
 	*x = PingRequest{}
-	mi := &file_emx_proto_msgTypes[26]
+	mi := &file_emx_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1599,7 +1697,7 @@ func (x *PingRequest) String() string {
 func (*PingRequest) ProtoMessage() {}
 
 func (x *PingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[26]
+	mi := &file_emx_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1612,7 +1710,7 @@ func (x *PingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingRequest.ProtoReflect.Descriptor instead.
 func (*PingRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{26}
+	return file_emx_proto_rawDescGZIP(), []int{28}
 }
 
 type PingReply struct {
@@ -1625,7 +1723,7 @@ type PingReply struct {
 
 func (x *PingReply) Reset() {
 	*x = PingReply{}
-	mi := &file_emx_proto_msgTypes[27]
+	mi := &file_emx_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1637,7 +1735,7 @@ func (x *PingReply) String() string {
 func (*PingReply) ProtoMessage() {}
 
 func (x *PingReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[27]
+	mi := &file_emx_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1650,7 +1748,7 @@ func (x *PingReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingReply.ProtoReflect.Descriptor instead.
 func (*PingReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{27}
+	return file_emx_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PingReply) GetVersion() string {
@@ -1675,7 +1773,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_emx_proto_msgTypes[28]
+	mi := &file_emx_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1687,7 +1785,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[28]
+	mi := &file_emx_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1700,7 +1798,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{28}
+	return file_emx_proto_rawDescGZIP(), []int{30}
 }
 
 type StatusReply struct {
@@ -1716,7 +1814,7 @@ type StatusReply struct {
 
 func (x *StatusReply) Reset() {
 	*x = StatusReply{}
-	mi := &file_emx_proto_msgTypes[29]
+	mi := &file_emx_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1728,7 +1826,7 @@ func (x *StatusReply) String() string {
 func (*StatusReply) ProtoMessage() {}
 
 func (x *StatusReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[29]
+	mi := &file_emx_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1741,7 +1839,7 @@ func (x *StatusReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusReply.ProtoReflect.Descriptor instead.
 func (*StatusReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{29}
+	return file_emx_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *StatusReply) GetDaemonPid() int32 {
@@ -1791,7 +1889,7 @@ type XrayState struct {
 
 func (x *XrayState) Reset() {
 	*x = XrayState{}
-	mi := &file_emx_proto_msgTypes[30]
+	mi := &file_emx_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1803,7 +1901,7 @@ func (x *XrayState) String() string {
 func (*XrayState) ProtoMessage() {}
 
 func (x *XrayState) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[30]
+	mi := &file_emx_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1816,7 +1914,7 @@ func (x *XrayState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use XrayState.ProtoReflect.Descriptor instead.
 func (*XrayState) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{30}
+	return file_emx_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *XrayState) GetRunning() bool {
@@ -1855,7 +1953,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_emx_proto_msgTypes[31]
+	mi := &file_emx_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1867,7 +1965,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[31]
+	mi := &file_emx_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1880,7 +1978,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{31}
+	return file_emx_proto_rawDescGZIP(), []int{33}
 }
 
 type ShutdownReply struct {
@@ -1891,7 +1989,7 @@ type ShutdownReply struct {
 
 func (x *ShutdownReply) Reset() {
 	*x = ShutdownReply{}
-	mi := &file_emx_proto_msgTypes[32]
+	mi := &file_emx_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1903,7 +2001,7 @@ func (x *ShutdownReply) String() string {
 func (*ShutdownReply) ProtoMessage() {}
 
 func (x *ShutdownReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[32]
+	mi := &file_emx_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1916,7 +2014,195 @@ func (x *ShutdownReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownReply.ProtoReflect.Descriptor instead.
 func (*ShutdownReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{32}
+	return file_emx_proto_rawDescGZIP(), []int{34}
+}
+
+// LogLevelRequest sets the xray log level when set is non-empty; always returns
+// the current level. Valid: debug|info|warning|error|none.
+type LogLevelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Set           string                 `protobuf:"bytes,1,opt,name=set,proto3" json:"set,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogLevelRequest) Reset() {
+	*x = LogLevelRequest{}
+	mi := &file_emx_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogLevelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogLevelRequest) ProtoMessage() {}
+
+func (x *LogLevelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_emx_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogLevelRequest.ProtoReflect.Descriptor instead.
+func (*LogLevelRequest) Descriptor() ([]byte, []int) {
+	return file_emx_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *LogLevelRequest) GetSet() string {
+	if x != nil {
+		return x.Set
+	}
+	return ""
+}
+
+type LogLevelReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Level         string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogLevelReply) Reset() {
+	*x = LogLevelReply{}
+	mi := &file_emx_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogLevelReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogLevelReply) ProtoMessage() {}
+
+func (x *LogLevelReply) ProtoReflect() protoreflect.Message {
+	mi := &file_emx_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogLevelReply.ProtoReflect.Descriptor instead.
+func (*LogLevelReply) Descriptor() ([]byte, []int) {
+	return file_emx_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *LogLevelReply) GetLevel() string {
+	if x != nil {
+		return x.Level
+	}
+	return ""
+}
+
+// LogCapRequest changes the per-file log cap (MB) when change=true (0 disables
+// rotation); always returns the current cap. Peak on-disk per log is ~2× cap.
+type LogCapRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SetMb         int32                  `protobuf:"varint,1,opt,name=set_mb,json=setMb,proto3" json:"set_mb,omitempty"`
+	Change        bool                   `protobuf:"varint,2,opt,name=change,proto3" json:"change,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogCapRequest) Reset() {
+	*x = LogCapRequest{}
+	mi := &file_emx_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogCapRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogCapRequest) ProtoMessage() {}
+
+func (x *LogCapRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_emx_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogCapRequest.ProtoReflect.Descriptor instead.
+func (*LogCapRequest) Descriptor() ([]byte, []int) {
+	return file_emx_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *LogCapRequest) GetSetMb() int32 {
+	if x != nil {
+		return x.SetMb
+	}
+	return 0
+}
+
+func (x *LogCapRequest) GetChange() bool {
+	if x != nil {
+		return x.Change
+	}
+	return false
+}
+
+type LogCapReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mb            int32                  `protobuf:"varint,1,opt,name=mb,proto3" json:"mb,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogCapReply) Reset() {
+	*x = LogCapReply{}
+	mi := &file_emx_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogCapReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogCapReply) ProtoMessage() {}
+
+func (x *LogCapReply) ProtoReflect() protoreflect.Message {
+	mi := &file_emx_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogCapReply.ProtoReflect.Descriptor instead.
+func (*LogCapReply) Descriptor() ([]byte, []int) {
+	return file_emx_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *LogCapReply) GetMb() int32 {
+	if x != nil {
+		return x.Mb
+	}
+	return 0
 }
 
 type Template struct {
@@ -1932,7 +2218,7 @@ type Template struct {
 
 func (x *Template) Reset() {
 	*x = Template{}
-	mi := &file_emx_proto_msgTypes[33]
+	mi := &file_emx_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1944,7 +2230,7 @@ func (x *Template) String() string {
 func (*Template) ProtoMessage() {}
 
 func (x *Template) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[33]
+	mi := &file_emx_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1957,7 +2243,7 @@ func (x *Template) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Template.ProtoReflect.Descriptor instead.
 func (*Template) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{33}
+	return file_emx_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *Template) GetName() string {
@@ -2004,7 +2290,7 @@ type TemplateListReply struct {
 
 func (x *TemplateListReply) Reset() {
 	*x = TemplateListReply{}
-	mi := &file_emx_proto_msgTypes[34]
+	mi := &file_emx_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2016,7 +2302,7 @@ func (x *TemplateListReply) String() string {
 func (*TemplateListReply) ProtoMessage() {}
 
 func (x *TemplateListReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[34]
+	mi := &file_emx_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2029,7 +2315,7 @@ func (x *TemplateListReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TemplateListReply.ProtoReflect.Descriptor instead.
 func (*TemplateListReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{34}
+	return file_emx_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *TemplateListReply) GetTemplates() []*Template {
@@ -2052,7 +2338,7 @@ type EntryAddRequest struct {
 
 func (x *EntryAddRequest) Reset() {
 	*x = EntryAddRequest{}
-	mi := &file_emx_proto_msgTypes[35]
+	mi := &file_emx_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2064,7 +2350,7 @@ func (x *EntryAddRequest) String() string {
 func (*EntryAddRequest) ProtoMessage() {}
 
 func (x *EntryAddRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[35]
+	mi := &file_emx_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2077,7 +2363,7 @@ func (x *EntryAddRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntryAddRequest.ProtoReflect.Descriptor instead.
 func (*EntryAddRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{35}
+	return file_emx_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *EntryAddRequest) GetName() string {
@@ -2128,7 +2414,7 @@ type EntryInfo struct {
 
 func (x *EntryInfo) Reset() {
 	*x = EntryInfo{}
-	mi := &file_emx_proto_msgTypes[36]
+	mi := &file_emx_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2140,7 +2426,7 @@ func (x *EntryInfo) String() string {
 func (*EntryInfo) ProtoMessage() {}
 
 func (x *EntryInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[36]
+	mi := &file_emx_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2153,7 +2439,7 @@ func (x *EntryInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntryInfo.ProtoReflect.Descriptor instead.
 func (*EntryInfo) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{36}
+	return file_emx_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *EntryInfo) GetId() uint32 {
@@ -2200,7 +2486,7 @@ type EntryReply struct {
 
 func (x *EntryReply) Reset() {
 	*x = EntryReply{}
-	mi := &file_emx_proto_msgTypes[37]
+	mi := &file_emx_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2212,7 +2498,7 @@ func (x *EntryReply) String() string {
 func (*EntryReply) ProtoMessage() {}
 
 func (x *EntryReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[37]
+	mi := &file_emx_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2225,7 +2511,7 @@ func (x *EntryReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntryReply.ProtoReflect.Descriptor instead.
 func (*EntryReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{37}
+	return file_emx_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *EntryReply) GetEntry() *EntryInfo {
@@ -2244,7 +2530,7 @@ type EntryListReply struct {
 
 func (x *EntryListReply) Reset() {
 	*x = EntryListReply{}
-	mi := &file_emx_proto_msgTypes[38]
+	mi := &file_emx_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2256,7 +2542,7 @@ func (x *EntryListReply) String() string {
 func (*EntryListReply) ProtoMessage() {}
 
 func (x *EntryListReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[38]
+	mi := &file_emx_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2269,7 +2555,7 @@ func (x *EntryListReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntryListReply.ProtoReflect.Descriptor instead.
 func (*EntryListReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{38}
+	return file_emx_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *EntryListReply) GetEntries() []*EntryInfo {
@@ -2292,7 +2578,7 @@ type InboundAddRequest struct {
 
 func (x *InboundAddRequest) Reset() {
 	*x = InboundAddRequest{}
-	mi := &file_emx_proto_msgTypes[39]
+	mi := &file_emx_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2304,7 +2590,7 @@ func (x *InboundAddRequest) String() string {
 func (*InboundAddRequest) ProtoMessage() {}
 
 func (x *InboundAddRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[39]
+	mi := &file_emx_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2317,7 +2603,7 @@ func (x *InboundAddRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundAddRequest.ProtoReflect.Descriptor instead.
 func (*InboundAddRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{39}
+	return file_emx_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *InboundAddRequest) GetName() string {
@@ -2373,7 +2659,7 @@ type InboundInfo struct {
 
 func (x *InboundInfo) Reset() {
 	*x = InboundInfo{}
-	mi := &file_emx_proto_msgTypes[40]
+	mi := &file_emx_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2385,7 +2671,7 @@ func (x *InboundInfo) String() string {
 func (*InboundInfo) ProtoMessage() {}
 
 func (x *InboundInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[40]
+	mi := &file_emx_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2398,7 +2684,7 @@ func (x *InboundInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundInfo.ProtoReflect.Descriptor instead.
 func (*InboundInfo) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{40}
+	return file_emx_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *InboundInfo) GetId() uint32 {
@@ -2480,7 +2766,7 @@ type InboundReply struct {
 
 func (x *InboundReply) Reset() {
 	*x = InboundReply{}
-	mi := &file_emx_proto_msgTypes[41]
+	mi := &file_emx_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2492,7 +2778,7 @@ func (x *InboundReply) String() string {
 func (*InboundReply) ProtoMessage() {}
 
 func (x *InboundReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[41]
+	mi := &file_emx_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2505,7 +2791,7 @@ func (x *InboundReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundReply.ProtoReflect.Descriptor instead.
 func (*InboundReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{41}
+	return file_emx_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *InboundReply) GetInbound() *InboundInfo {
@@ -2524,7 +2810,7 @@ type InboundListReply struct {
 
 func (x *InboundListReply) Reset() {
 	*x = InboundListReply{}
-	mi := &file_emx_proto_msgTypes[42]
+	mi := &file_emx_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2536,7 +2822,7 @@ func (x *InboundListReply) String() string {
 func (*InboundListReply) ProtoMessage() {}
 
 func (x *InboundListReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[42]
+	mi := &file_emx_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2549,7 +2835,7 @@ func (x *InboundListReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundListReply.ProtoReflect.Descriptor instead.
 func (*InboundListReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{42}
+	return file_emx_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *InboundListReply) GetInbounds() []*InboundInfo {
@@ -2570,7 +2856,7 @@ type InboundUserAddRequest struct {
 
 func (x *InboundUserAddRequest) Reset() {
 	*x = InboundUserAddRequest{}
-	mi := &file_emx_proto_msgTypes[43]
+	mi := &file_emx_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2582,7 +2868,7 @@ func (x *InboundUserAddRequest) String() string {
 func (*InboundUserAddRequest) ProtoMessage() {}
 
 func (x *InboundUserAddRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[43]
+	mi := &file_emx_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2595,7 +2881,7 @@ func (x *InboundUserAddRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundUserAddRequest.ProtoReflect.Descriptor instead.
 func (*InboundUserAddRequest) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{43}
+	return file_emx_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *InboundUserAddRequest) GetInboundId() uint32 {
@@ -2635,7 +2921,7 @@ type UserInfo struct {
 
 func (x *UserInfo) Reset() {
 	*x = UserInfo{}
-	mi := &file_emx_proto_msgTypes[44]
+	mi := &file_emx_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2647,7 +2933,7 @@ func (x *UserInfo) String() string {
 func (*UserInfo) ProtoMessage() {}
 
 func (x *UserInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[44]
+	mi := &file_emx_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2660,7 +2946,7 @@ func (x *UserInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserInfo.ProtoReflect.Descriptor instead.
 func (*UserInfo) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{44}
+	return file_emx_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *UserInfo) GetId() uint32 {
@@ -2728,7 +3014,7 @@ type InboundUserReply struct {
 
 func (x *InboundUserReply) Reset() {
 	*x = InboundUserReply{}
-	mi := &file_emx_proto_msgTypes[45]
+	mi := &file_emx_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2740,7 +3026,7 @@ func (x *InboundUserReply) String() string {
 func (*InboundUserReply) ProtoMessage() {}
 
 func (x *InboundUserReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[45]
+	mi := &file_emx_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2753,7 +3039,7 @@ func (x *InboundUserReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundUserReply.ProtoReflect.Descriptor instead.
 func (*InboundUserReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{45}
+	return file_emx_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *InboundUserReply) GetUser() *UserInfo {
@@ -2772,7 +3058,7 @@ type InboundUserListReply struct {
 
 func (x *InboundUserListReply) Reset() {
 	*x = InboundUserListReply{}
-	mi := &file_emx_proto_msgTypes[46]
+	mi := &file_emx_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2784,7 +3070,7 @@ func (x *InboundUserListReply) String() string {
 func (*InboundUserListReply) ProtoMessage() {}
 
 func (x *InboundUserListReply) ProtoReflect() protoreflect.Message {
-	mi := &file_emx_proto_msgTypes[46]
+	mi := &file_emx_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2797,7 +3083,7 @@ func (x *InboundUserListReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundUserListReply.ProtoReflect.Descriptor instead.
 func (*InboundUserListReply) Descriptor() ([]byte, []int) {
-	return file_emx_proto_rawDescGZIP(), []int{46}
+	return file_emx_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *InboundUserListReply) GetUsers() []*UserInfo {
@@ -2858,7 +3144,12 @@ const file_emx_proto_rawDesc = "" +
 	"\x02up\x18\x03 \x01(\x03R\x02up\x12\x12\n" +
 	"\x04down\x18\x04 \x01(\x03R\x04down\":\n" +
 	"\x10TrafficLiveReply\x12&\n" +
-	"\x05items\x18\x01 \x03(\v2\x10.emx.v1.LiveItemR\x05items\"\x92\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x10.emx.v1.LiveItemR\x05items\"L\n" +
+	"\x17TrafficRetentionRequest\x12\x19\n" +
+	"\bset_days\x18\x01 \x01(\x05R\asetDays\x12\x16\n" +
+	"\x06change\x18\x02 \x01(\bR\x06change\"+\n" +
+	"\x15TrafficRetentionReply\x12\x12\n" +
+	"\x04days\x18\x01 \x01(\x05R\x04days\"\x92\x01\n" +
 	"\rSubAddRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1d\n" +
@@ -2948,7 +3239,16 @@ const file_emx_proto_rawDesc = "" +
 	"\n" +
 	"last_error\x18\x04 \x01(\tR\tlastError\"\x11\n" +
 	"\x0fShutdownRequest\"\x0f\n" +
-	"\rShutdownReply\"\x92\x01\n" +
+	"\rShutdownReply\"#\n" +
+	"\x0fLogLevelRequest\x12\x10\n" +
+	"\x03set\x18\x01 \x01(\tR\x03set\"%\n" +
+	"\rLogLevelReply\x12\x14\n" +
+	"\x05level\x18\x01 \x01(\tR\x05level\">\n" +
+	"\rLogCapRequest\x12\x15\n" +
+	"\x06set_mb\x18\x01 \x01(\x05R\x05setMb\x12\x16\n" +
+	"\x06change\x18\x02 \x01(\bR\x06change\"\x1d\n" +
+	"\vLogCapReply\x12\x0e\n" +
+	"\x02mb\x18\x01 \x01(\x05R\x02mb\"\x92\x01\n" +
 	"\bTemplate\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +
@@ -3017,11 +3317,15 @@ const file_emx_proto_rawDesc = "" +
 	"\x10InboundUserReply\x12$\n" +
 	"\x04user\x18\x01 \x01(\v2\x10.emx.v1.UserInfoR\x04user\">\n" +
 	"\x14InboundUserListReply\x12&\n" +
-	"\x05users\x18\x01 \x03(\v2\x10.emx.v1.UserInfoR\x05users2\xf4\x0f\n" +
+	"\x05users\x18\x01 \x03(\v2\x10.emx.v1.UserInfoR\x05users2\xec\x11\n" +
 	"\x06Daemon\x12.\n" +
 	"\x04Ping\x12\x13.emx.v1.PingRequest\x1a\x11.emx.v1.PingReply\x124\n" +
 	"\x06Status\x12\x15.emx.v1.StatusRequest\x1a\x13.emx.v1.StatusReply\x12:\n" +
-	"\bShutdown\x12\x17.emx.v1.ShutdownRequest\x1a\x15.emx.v1.ShutdownReply\x128\n" +
+	"\bShutdown\x12\x17.emx.v1.ShutdownRequest\x1a\x15.emx.v1.ShutdownReply\x120\n" +
+	"\n" +
+	"XrayConfig\x12\r.emx.v1.Empty\x1a\x13.emx.v1.ConfigReply\x12:\n" +
+	"\bLogLevel\x12\x17.emx.v1.LogLevelRequest\x1a\x15.emx.v1.LogLevelReply\x124\n" +
+	"\x06LogCap\x12\x15.emx.v1.LogCapRequest\x1a\x13.emx.v1.LogCapReply\x128\n" +
 	"\fTemplateList\x12\r.emx.v1.Empty\x1a\x19.emx.v1.TemplateListReply\x127\n" +
 	"\bEntryAdd\x12\x17.emx.v1.EntryAddRequest\x1a\x12.emx.v1.EntryReply\x122\n" +
 	"\tEntryList\x12\r.emx.v1.Empty\x1a\x16.emx.v1.EntryListReply\x12/\n" +
@@ -3043,7 +3347,8 @@ const file_emx_proto_rawDesc = "" +
 	"\x15InboundUserSetEnabled\x12\x19.emx.v1.SetEnabledRequest\x1a\r.emx.v1.Empty\x12.\n" +
 	"\aWinners\x12\r.emx.v1.Empty\x1a\x14.emx.v1.WinnersReply\x127\n" +
 	"\aTraffic\x12\x16.emx.v1.TrafficRequest\x1a\x14.emx.v1.TrafficReply\x126\n" +
-	"\vTrafficLive\x12\r.emx.v1.Empty\x1a\x18.emx.v1.TrafficLiveReply\x122\n" +
+	"\vTrafficLive\x12\r.emx.v1.Empty\x1a\x18.emx.v1.TrafficLiveReply\x12R\n" +
+	"\x10TrafficRetention\x12\x1f.emx.v1.TrafficRetentionRequest\x1a\x1d.emx.v1.TrafficRetentionReply\x122\n" +
 	"\fExportConfig\x12\r.emx.v1.Empty\x1a\x13.emx.v1.ConfigReply\x12:\n" +
 	"\fImportConfig\x12\x15.emx.v1.ImportRequest\x1a\x13.emx.v1.ImportReply\x121\n" +
 	"\x06SubAdd\x12\x15.emx.v1.SubAddRequest\x1a\x10.emx.v1.SubReply\x12.\n" +
@@ -3069,144 +3374,158 @@ func file_emx_proto_rawDescGZIP() []byte {
 	return file_emx_proto_rawDescData
 }
 
-var file_emx_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_emx_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_emx_proto_goTypes = []any{
-	(*SubOptionsRequest)(nil),      // 0: emx.v1.SubOptionsRequest
-	(*RenameRequest)(nil),          // 1: emx.v1.RenameRequest
-	(*SetEnabledRequest)(nil),      // 2: emx.v1.SetEnabledRequest
-	(*WinnerInfo)(nil),             // 3: emx.v1.WinnerInfo
-	(*WinnersReply)(nil),           // 4: emx.v1.WinnersReply
-	(*TrafficRequest)(nil),         // 5: emx.v1.TrafficRequest
-	(*TrafficItem)(nil),            // 6: emx.v1.TrafficItem
-	(*TrafficReply)(nil),           // 7: emx.v1.TrafficReply
-	(*LiveItem)(nil),               // 8: emx.v1.LiveItem
-	(*TrafficLiveReply)(nil),       // 9: emx.v1.TrafficLiveReply
-	(*SubAddRequest)(nil),          // 10: emx.v1.SubAddRequest
-	(*SubInfo)(nil),                // 11: emx.v1.SubInfo
-	(*SubReply)(nil),               // 12: emx.v1.SubReply
-	(*SubListReply)(nil),           // 13: emx.v1.SubListReply
-	(*SubRefreshRequest)(nil),      // 14: emx.v1.SubRefreshRequest
-	(*SubRefreshReply)(nil),        // 15: emx.v1.SubRefreshReply
-	(*NodeInfo)(nil),               // 16: emx.v1.NodeInfo
-	(*SubNodesReply)(nil),          // 17: emx.v1.SubNodesReply
-	(*SubNodeDisabledRequest)(nil), // 18: emx.v1.SubNodeDisabledRequest
-	(*Empty)(nil),                  // 19: emx.v1.Empty
-	(*IdRequest)(nil),              // 20: emx.v1.IdRequest
-	(*DuplicateRequest)(nil),       // 21: emx.v1.DuplicateRequest
-	(*ConfigReply)(nil),            // 22: emx.v1.ConfigReply
-	(*SetConfigRequest)(nil),       // 23: emx.v1.SetConfigRequest
-	(*ImportRequest)(nil),          // 24: emx.v1.ImportRequest
-	(*ImportReply)(nil),            // 25: emx.v1.ImportReply
-	(*PingRequest)(nil),            // 26: emx.v1.PingRequest
-	(*PingReply)(nil),              // 27: emx.v1.PingReply
-	(*StatusRequest)(nil),          // 28: emx.v1.StatusRequest
-	(*StatusReply)(nil),            // 29: emx.v1.StatusReply
-	(*XrayState)(nil),              // 30: emx.v1.XrayState
-	(*ShutdownRequest)(nil),        // 31: emx.v1.ShutdownRequest
-	(*ShutdownReply)(nil),          // 32: emx.v1.ShutdownReply
-	(*Template)(nil),               // 33: emx.v1.Template
-	(*TemplateListReply)(nil),      // 34: emx.v1.TemplateListReply
-	(*EntryAddRequest)(nil),        // 35: emx.v1.EntryAddRequest
-	(*EntryInfo)(nil),              // 36: emx.v1.EntryInfo
-	(*EntryReply)(nil),             // 37: emx.v1.EntryReply
-	(*EntryListReply)(nil),         // 38: emx.v1.EntryListReply
-	(*InboundAddRequest)(nil),      // 39: emx.v1.InboundAddRequest
-	(*InboundInfo)(nil),            // 40: emx.v1.InboundInfo
-	(*InboundReply)(nil),           // 41: emx.v1.InboundReply
-	(*InboundListReply)(nil),       // 42: emx.v1.InboundListReply
-	(*InboundUserAddRequest)(nil),  // 43: emx.v1.InboundUserAddRequest
-	(*UserInfo)(nil),               // 44: emx.v1.UserInfo
-	(*InboundUserReply)(nil),       // 45: emx.v1.InboundUserReply
-	(*InboundUserListReply)(nil),   // 46: emx.v1.InboundUserListReply
+	(*SubOptionsRequest)(nil),       // 0: emx.v1.SubOptionsRequest
+	(*RenameRequest)(nil),           // 1: emx.v1.RenameRequest
+	(*SetEnabledRequest)(nil),       // 2: emx.v1.SetEnabledRequest
+	(*WinnerInfo)(nil),              // 3: emx.v1.WinnerInfo
+	(*WinnersReply)(nil),            // 4: emx.v1.WinnersReply
+	(*TrafficRequest)(nil),          // 5: emx.v1.TrafficRequest
+	(*TrafficItem)(nil),             // 6: emx.v1.TrafficItem
+	(*TrafficReply)(nil),            // 7: emx.v1.TrafficReply
+	(*LiveItem)(nil),                // 8: emx.v1.LiveItem
+	(*TrafficLiveReply)(nil),        // 9: emx.v1.TrafficLiveReply
+	(*TrafficRetentionRequest)(nil), // 10: emx.v1.TrafficRetentionRequest
+	(*TrafficRetentionReply)(nil),   // 11: emx.v1.TrafficRetentionReply
+	(*SubAddRequest)(nil),           // 12: emx.v1.SubAddRequest
+	(*SubInfo)(nil),                 // 13: emx.v1.SubInfo
+	(*SubReply)(nil),                // 14: emx.v1.SubReply
+	(*SubListReply)(nil),            // 15: emx.v1.SubListReply
+	(*SubRefreshRequest)(nil),       // 16: emx.v1.SubRefreshRequest
+	(*SubRefreshReply)(nil),         // 17: emx.v1.SubRefreshReply
+	(*NodeInfo)(nil),                // 18: emx.v1.NodeInfo
+	(*SubNodesReply)(nil),           // 19: emx.v1.SubNodesReply
+	(*SubNodeDisabledRequest)(nil),  // 20: emx.v1.SubNodeDisabledRequest
+	(*Empty)(nil),                   // 21: emx.v1.Empty
+	(*IdRequest)(nil),               // 22: emx.v1.IdRequest
+	(*DuplicateRequest)(nil),        // 23: emx.v1.DuplicateRequest
+	(*ConfigReply)(nil),             // 24: emx.v1.ConfigReply
+	(*SetConfigRequest)(nil),        // 25: emx.v1.SetConfigRequest
+	(*ImportRequest)(nil),           // 26: emx.v1.ImportRequest
+	(*ImportReply)(nil),             // 27: emx.v1.ImportReply
+	(*PingRequest)(nil),             // 28: emx.v1.PingRequest
+	(*PingReply)(nil),               // 29: emx.v1.PingReply
+	(*StatusRequest)(nil),           // 30: emx.v1.StatusRequest
+	(*StatusReply)(nil),             // 31: emx.v1.StatusReply
+	(*XrayState)(nil),               // 32: emx.v1.XrayState
+	(*ShutdownRequest)(nil),         // 33: emx.v1.ShutdownRequest
+	(*ShutdownReply)(nil),           // 34: emx.v1.ShutdownReply
+	(*LogLevelRequest)(nil),         // 35: emx.v1.LogLevelRequest
+	(*LogLevelReply)(nil),           // 36: emx.v1.LogLevelReply
+	(*LogCapRequest)(nil),           // 37: emx.v1.LogCapRequest
+	(*LogCapReply)(nil),             // 38: emx.v1.LogCapReply
+	(*Template)(nil),                // 39: emx.v1.Template
+	(*TemplateListReply)(nil),       // 40: emx.v1.TemplateListReply
+	(*EntryAddRequest)(nil),         // 41: emx.v1.EntryAddRequest
+	(*EntryInfo)(nil),               // 42: emx.v1.EntryInfo
+	(*EntryReply)(nil),              // 43: emx.v1.EntryReply
+	(*EntryListReply)(nil),          // 44: emx.v1.EntryListReply
+	(*InboundAddRequest)(nil),       // 45: emx.v1.InboundAddRequest
+	(*InboundInfo)(nil),             // 46: emx.v1.InboundInfo
+	(*InboundReply)(nil),            // 47: emx.v1.InboundReply
+	(*InboundListReply)(nil),        // 48: emx.v1.InboundListReply
+	(*InboundUserAddRequest)(nil),   // 49: emx.v1.InboundUserAddRequest
+	(*UserInfo)(nil),                // 50: emx.v1.UserInfo
+	(*InboundUserReply)(nil),        // 51: emx.v1.InboundUserReply
+	(*InboundUserListReply)(nil),    // 52: emx.v1.InboundUserListReply
 }
 var file_emx_proto_depIdxs = []int32{
 	3,  // 0: emx.v1.WinnersReply.winners:type_name -> emx.v1.WinnerInfo
 	6,  // 1: emx.v1.TrafficReply.inbounds:type_name -> emx.v1.TrafficItem
 	6,  // 2: emx.v1.TrafficReply.outbounds:type_name -> emx.v1.TrafficItem
 	8,  // 3: emx.v1.TrafficLiveReply.items:type_name -> emx.v1.LiveItem
-	11, // 4: emx.v1.SubReply.sub:type_name -> emx.v1.SubInfo
-	11, // 5: emx.v1.SubListReply.subs:type_name -> emx.v1.SubInfo
-	16, // 6: emx.v1.SubNodesReply.nodes:type_name -> emx.v1.NodeInfo
-	30, // 7: emx.v1.StatusReply.xray:type_name -> emx.v1.XrayState
-	33, // 8: emx.v1.TemplateListReply.templates:type_name -> emx.v1.Template
-	36, // 9: emx.v1.EntryReply.entry:type_name -> emx.v1.EntryInfo
-	36, // 10: emx.v1.EntryListReply.entries:type_name -> emx.v1.EntryInfo
-	40, // 11: emx.v1.InboundReply.inbound:type_name -> emx.v1.InboundInfo
-	40, // 12: emx.v1.InboundListReply.inbounds:type_name -> emx.v1.InboundInfo
-	44, // 13: emx.v1.InboundUserReply.user:type_name -> emx.v1.UserInfo
-	44, // 14: emx.v1.InboundUserListReply.users:type_name -> emx.v1.UserInfo
-	26, // 15: emx.v1.Daemon.Ping:input_type -> emx.v1.PingRequest
-	28, // 16: emx.v1.Daemon.Status:input_type -> emx.v1.StatusRequest
-	31, // 17: emx.v1.Daemon.Shutdown:input_type -> emx.v1.ShutdownRequest
-	19, // 18: emx.v1.Daemon.TemplateList:input_type -> emx.v1.Empty
-	35, // 19: emx.v1.Daemon.EntryAdd:input_type -> emx.v1.EntryAddRequest
-	19, // 20: emx.v1.Daemon.EntryList:input_type -> emx.v1.Empty
-	20, // 21: emx.v1.Daemon.EntryRemove:input_type -> emx.v1.IdRequest
-	1,  // 22: emx.v1.Daemon.EntryRename:input_type -> emx.v1.RenameRequest
-	21, // 23: emx.v1.Daemon.EntryDuplicate:input_type -> emx.v1.DuplicateRequest
-	20, // 24: emx.v1.Daemon.EntryGetConfig:input_type -> emx.v1.IdRequest
-	23, // 25: emx.v1.Daemon.EntrySetConfig:input_type -> emx.v1.SetConfigRequest
-	39, // 26: emx.v1.Daemon.InboundAdd:input_type -> emx.v1.InboundAddRequest
-	19, // 27: emx.v1.Daemon.InboundList:input_type -> emx.v1.Empty
-	20, // 28: emx.v1.Daemon.InboundRemove:input_type -> emx.v1.IdRequest
-	21, // 29: emx.v1.Daemon.InboundDuplicate:input_type -> emx.v1.DuplicateRequest
-	20, // 30: emx.v1.Daemon.InboundGetConfig:input_type -> emx.v1.IdRequest
-	23, // 31: emx.v1.Daemon.InboundSetConfig:input_type -> emx.v1.SetConfigRequest
-	43, // 32: emx.v1.Daemon.InboundUserAdd:input_type -> emx.v1.InboundUserAddRequest
-	20, // 33: emx.v1.Daemon.InboundUserList:input_type -> emx.v1.IdRequest
-	20, // 34: emx.v1.Daemon.InboundUserRemove:input_type -> emx.v1.IdRequest
-	2,  // 35: emx.v1.Daemon.InboundUserSetEnabled:input_type -> emx.v1.SetEnabledRequest
-	19, // 36: emx.v1.Daemon.Winners:input_type -> emx.v1.Empty
-	5,  // 37: emx.v1.Daemon.Traffic:input_type -> emx.v1.TrafficRequest
-	19, // 38: emx.v1.Daemon.TrafficLive:input_type -> emx.v1.Empty
-	19, // 39: emx.v1.Daemon.ExportConfig:input_type -> emx.v1.Empty
-	24, // 40: emx.v1.Daemon.ImportConfig:input_type -> emx.v1.ImportRequest
-	10, // 41: emx.v1.Daemon.SubAdd:input_type -> emx.v1.SubAddRequest
-	19, // 42: emx.v1.Daemon.SubList:input_type -> emx.v1.Empty
-	20, // 43: emx.v1.Daemon.SubRemove:input_type -> emx.v1.IdRequest
-	2,  // 44: emx.v1.Daemon.SubSetEnabled:input_type -> emx.v1.SetEnabledRequest
-	14, // 45: emx.v1.Daemon.SubRefresh:input_type -> emx.v1.SubRefreshRequest
-	20, // 46: emx.v1.Daemon.SubNodes:input_type -> emx.v1.IdRequest
-	18, // 47: emx.v1.Daemon.SubSetNodeDisabled:input_type -> emx.v1.SubNodeDisabledRequest
-	1,  // 48: emx.v1.Daemon.SubRename:input_type -> emx.v1.RenameRequest
-	0,  // 49: emx.v1.Daemon.SubSetOptions:input_type -> emx.v1.SubOptionsRequest
-	27, // 50: emx.v1.Daemon.Ping:output_type -> emx.v1.PingReply
-	29, // 51: emx.v1.Daemon.Status:output_type -> emx.v1.StatusReply
-	32, // 52: emx.v1.Daemon.Shutdown:output_type -> emx.v1.ShutdownReply
-	34, // 53: emx.v1.Daemon.TemplateList:output_type -> emx.v1.TemplateListReply
-	37, // 54: emx.v1.Daemon.EntryAdd:output_type -> emx.v1.EntryReply
-	38, // 55: emx.v1.Daemon.EntryList:output_type -> emx.v1.EntryListReply
-	19, // 56: emx.v1.Daemon.EntryRemove:output_type -> emx.v1.Empty
-	19, // 57: emx.v1.Daemon.EntryRename:output_type -> emx.v1.Empty
-	37, // 58: emx.v1.Daemon.EntryDuplicate:output_type -> emx.v1.EntryReply
-	22, // 59: emx.v1.Daemon.EntryGetConfig:output_type -> emx.v1.ConfigReply
-	37, // 60: emx.v1.Daemon.EntrySetConfig:output_type -> emx.v1.EntryReply
-	41, // 61: emx.v1.Daemon.InboundAdd:output_type -> emx.v1.InboundReply
-	42, // 62: emx.v1.Daemon.InboundList:output_type -> emx.v1.InboundListReply
-	19, // 63: emx.v1.Daemon.InboundRemove:output_type -> emx.v1.Empty
-	41, // 64: emx.v1.Daemon.InboundDuplicate:output_type -> emx.v1.InboundReply
-	22, // 65: emx.v1.Daemon.InboundGetConfig:output_type -> emx.v1.ConfigReply
-	41, // 66: emx.v1.Daemon.InboundSetConfig:output_type -> emx.v1.InboundReply
-	45, // 67: emx.v1.Daemon.InboundUserAdd:output_type -> emx.v1.InboundUserReply
-	46, // 68: emx.v1.Daemon.InboundUserList:output_type -> emx.v1.InboundUserListReply
-	19, // 69: emx.v1.Daemon.InboundUserRemove:output_type -> emx.v1.Empty
-	19, // 70: emx.v1.Daemon.InboundUserSetEnabled:output_type -> emx.v1.Empty
-	4,  // 71: emx.v1.Daemon.Winners:output_type -> emx.v1.WinnersReply
-	7,  // 72: emx.v1.Daemon.Traffic:output_type -> emx.v1.TrafficReply
-	9,  // 73: emx.v1.Daemon.TrafficLive:output_type -> emx.v1.TrafficLiveReply
-	22, // 74: emx.v1.Daemon.ExportConfig:output_type -> emx.v1.ConfigReply
-	25, // 75: emx.v1.Daemon.ImportConfig:output_type -> emx.v1.ImportReply
-	12, // 76: emx.v1.Daemon.SubAdd:output_type -> emx.v1.SubReply
-	13, // 77: emx.v1.Daemon.SubList:output_type -> emx.v1.SubListReply
-	19, // 78: emx.v1.Daemon.SubRemove:output_type -> emx.v1.Empty
-	19, // 79: emx.v1.Daemon.SubSetEnabled:output_type -> emx.v1.Empty
-	15, // 80: emx.v1.Daemon.SubRefresh:output_type -> emx.v1.SubRefreshReply
-	17, // 81: emx.v1.Daemon.SubNodes:output_type -> emx.v1.SubNodesReply
-	19, // 82: emx.v1.Daemon.SubSetNodeDisabled:output_type -> emx.v1.Empty
-	19, // 83: emx.v1.Daemon.SubRename:output_type -> emx.v1.Empty
-	12, // 84: emx.v1.Daemon.SubSetOptions:output_type -> emx.v1.SubReply
-	50, // [50:85] is the sub-list for method output_type
-	15, // [15:50] is the sub-list for method input_type
+	13, // 4: emx.v1.SubReply.sub:type_name -> emx.v1.SubInfo
+	13, // 5: emx.v1.SubListReply.subs:type_name -> emx.v1.SubInfo
+	18, // 6: emx.v1.SubNodesReply.nodes:type_name -> emx.v1.NodeInfo
+	32, // 7: emx.v1.StatusReply.xray:type_name -> emx.v1.XrayState
+	39, // 8: emx.v1.TemplateListReply.templates:type_name -> emx.v1.Template
+	42, // 9: emx.v1.EntryReply.entry:type_name -> emx.v1.EntryInfo
+	42, // 10: emx.v1.EntryListReply.entries:type_name -> emx.v1.EntryInfo
+	46, // 11: emx.v1.InboundReply.inbound:type_name -> emx.v1.InboundInfo
+	46, // 12: emx.v1.InboundListReply.inbounds:type_name -> emx.v1.InboundInfo
+	50, // 13: emx.v1.InboundUserReply.user:type_name -> emx.v1.UserInfo
+	50, // 14: emx.v1.InboundUserListReply.users:type_name -> emx.v1.UserInfo
+	28, // 15: emx.v1.Daemon.Ping:input_type -> emx.v1.PingRequest
+	30, // 16: emx.v1.Daemon.Status:input_type -> emx.v1.StatusRequest
+	33, // 17: emx.v1.Daemon.Shutdown:input_type -> emx.v1.ShutdownRequest
+	21, // 18: emx.v1.Daemon.XrayConfig:input_type -> emx.v1.Empty
+	35, // 19: emx.v1.Daemon.LogLevel:input_type -> emx.v1.LogLevelRequest
+	37, // 20: emx.v1.Daemon.LogCap:input_type -> emx.v1.LogCapRequest
+	21, // 21: emx.v1.Daemon.TemplateList:input_type -> emx.v1.Empty
+	41, // 22: emx.v1.Daemon.EntryAdd:input_type -> emx.v1.EntryAddRequest
+	21, // 23: emx.v1.Daemon.EntryList:input_type -> emx.v1.Empty
+	22, // 24: emx.v1.Daemon.EntryRemove:input_type -> emx.v1.IdRequest
+	1,  // 25: emx.v1.Daemon.EntryRename:input_type -> emx.v1.RenameRequest
+	23, // 26: emx.v1.Daemon.EntryDuplicate:input_type -> emx.v1.DuplicateRequest
+	22, // 27: emx.v1.Daemon.EntryGetConfig:input_type -> emx.v1.IdRequest
+	25, // 28: emx.v1.Daemon.EntrySetConfig:input_type -> emx.v1.SetConfigRequest
+	45, // 29: emx.v1.Daemon.InboundAdd:input_type -> emx.v1.InboundAddRequest
+	21, // 30: emx.v1.Daemon.InboundList:input_type -> emx.v1.Empty
+	22, // 31: emx.v1.Daemon.InboundRemove:input_type -> emx.v1.IdRequest
+	23, // 32: emx.v1.Daemon.InboundDuplicate:input_type -> emx.v1.DuplicateRequest
+	22, // 33: emx.v1.Daemon.InboundGetConfig:input_type -> emx.v1.IdRequest
+	25, // 34: emx.v1.Daemon.InboundSetConfig:input_type -> emx.v1.SetConfigRequest
+	49, // 35: emx.v1.Daemon.InboundUserAdd:input_type -> emx.v1.InboundUserAddRequest
+	22, // 36: emx.v1.Daemon.InboundUserList:input_type -> emx.v1.IdRequest
+	22, // 37: emx.v1.Daemon.InboundUserRemove:input_type -> emx.v1.IdRequest
+	2,  // 38: emx.v1.Daemon.InboundUserSetEnabled:input_type -> emx.v1.SetEnabledRequest
+	21, // 39: emx.v1.Daemon.Winners:input_type -> emx.v1.Empty
+	5,  // 40: emx.v1.Daemon.Traffic:input_type -> emx.v1.TrafficRequest
+	21, // 41: emx.v1.Daemon.TrafficLive:input_type -> emx.v1.Empty
+	10, // 42: emx.v1.Daemon.TrafficRetention:input_type -> emx.v1.TrafficRetentionRequest
+	21, // 43: emx.v1.Daemon.ExportConfig:input_type -> emx.v1.Empty
+	26, // 44: emx.v1.Daemon.ImportConfig:input_type -> emx.v1.ImportRequest
+	12, // 45: emx.v1.Daemon.SubAdd:input_type -> emx.v1.SubAddRequest
+	21, // 46: emx.v1.Daemon.SubList:input_type -> emx.v1.Empty
+	22, // 47: emx.v1.Daemon.SubRemove:input_type -> emx.v1.IdRequest
+	2,  // 48: emx.v1.Daemon.SubSetEnabled:input_type -> emx.v1.SetEnabledRequest
+	16, // 49: emx.v1.Daemon.SubRefresh:input_type -> emx.v1.SubRefreshRequest
+	22, // 50: emx.v1.Daemon.SubNodes:input_type -> emx.v1.IdRequest
+	20, // 51: emx.v1.Daemon.SubSetNodeDisabled:input_type -> emx.v1.SubNodeDisabledRequest
+	1,  // 52: emx.v1.Daemon.SubRename:input_type -> emx.v1.RenameRequest
+	0,  // 53: emx.v1.Daemon.SubSetOptions:input_type -> emx.v1.SubOptionsRequest
+	29, // 54: emx.v1.Daemon.Ping:output_type -> emx.v1.PingReply
+	31, // 55: emx.v1.Daemon.Status:output_type -> emx.v1.StatusReply
+	34, // 56: emx.v1.Daemon.Shutdown:output_type -> emx.v1.ShutdownReply
+	24, // 57: emx.v1.Daemon.XrayConfig:output_type -> emx.v1.ConfigReply
+	36, // 58: emx.v1.Daemon.LogLevel:output_type -> emx.v1.LogLevelReply
+	38, // 59: emx.v1.Daemon.LogCap:output_type -> emx.v1.LogCapReply
+	40, // 60: emx.v1.Daemon.TemplateList:output_type -> emx.v1.TemplateListReply
+	43, // 61: emx.v1.Daemon.EntryAdd:output_type -> emx.v1.EntryReply
+	44, // 62: emx.v1.Daemon.EntryList:output_type -> emx.v1.EntryListReply
+	21, // 63: emx.v1.Daemon.EntryRemove:output_type -> emx.v1.Empty
+	21, // 64: emx.v1.Daemon.EntryRename:output_type -> emx.v1.Empty
+	43, // 65: emx.v1.Daemon.EntryDuplicate:output_type -> emx.v1.EntryReply
+	24, // 66: emx.v1.Daemon.EntryGetConfig:output_type -> emx.v1.ConfigReply
+	43, // 67: emx.v1.Daemon.EntrySetConfig:output_type -> emx.v1.EntryReply
+	47, // 68: emx.v1.Daemon.InboundAdd:output_type -> emx.v1.InboundReply
+	48, // 69: emx.v1.Daemon.InboundList:output_type -> emx.v1.InboundListReply
+	21, // 70: emx.v1.Daemon.InboundRemove:output_type -> emx.v1.Empty
+	47, // 71: emx.v1.Daemon.InboundDuplicate:output_type -> emx.v1.InboundReply
+	24, // 72: emx.v1.Daemon.InboundGetConfig:output_type -> emx.v1.ConfigReply
+	47, // 73: emx.v1.Daemon.InboundSetConfig:output_type -> emx.v1.InboundReply
+	51, // 74: emx.v1.Daemon.InboundUserAdd:output_type -> emx.v1.InboundUserReply
+	52, // 75: emx.v1.Daemon.InboundUserList:output_type -> emx.v1.InboundUserListReply
+	21, // 76: emx.v1.Daemon.InboundUserRemove:output_type -> emx.v1.Empty
+	21, // 77: emx.v1.Daemon.InboundUserSetEnabled:output_type -> emx.v1.Empty
+	4,  // 78: emx.v1.Daemon.Winners:output_type -> emx.v1.WinnersReply
+	7,  // 79: emx.v1.Daemon.Traffic:output_type -> emx.v1.TrafficReply
+	9,  // 80: emx.v1.Daemon.TrafficLive:output_type -> emx.v1.TrafficLiveReply
+	11, // 81: emx.v1.Daemon.TrafficRetention:output_type -> emx.v1.TrafficRetentionReply
+	24, // 82: emx.v1.Daemon.ExportConfig:output_type -> emx.v1.ConfigReply
+	27, // 83: emx.v1.Daemon.ImportConfig:output_type -> emx.v1.ImportReply
+	14, // 84: emx.v1.Daemon.SubAdd:output_type -> emx.v1.SubReply
+	15, // 85: emx.v1.Daemon.SubList:output_type -> emx.v1.SubListReply
+	21, // 86: emx.v1.Daemon.SubRemove:output_type -> emx.v1.Empty
+	21, // 87: emx.v1.Daemon.SubSetEnabled:output_type -> emx.v1.Empty
+	17, // 88: emx.v1.Daemon.SubRefresh:output_type -> emx.v1.SubRefreshReply
+	19, // 89: emx.v1.Daemon.SubNodes:output_type -> emx.v1.SubNodesReply
+	21, // 90: emx.v1.Daemon.SubSetNodeDisabled:output_type -> emx.v1.Empty
+	21, // 91: emx.v1.Daemon.SubRename:output_type -> emx.v1.Empty
+	14, // 92: emx.v1.Daemon.SubSetOptions:output_type -> emx.v1.SubReply
+	54, // [54:93] is the sub-list for method output_type
+	15, // [15:54] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
 	15, // [15:15] is the sub-list for extension extendee
 	0,  // [0:15] is the sub-list for field type_name
@@ -3223,7 +3542,7 @@ func file_emx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_emx_proto_rawDesc), len(file_emx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   47,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

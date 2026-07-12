@@ -104,6 +104,7 @@ func (s *Supervisor) reconcileLocked() error {
 	cfg, err := xray.Generate(entries, inbounds, slots, xray.GenOptions{
 		AccessLog: s.paths.AccessLog(),
 		ErrorLog:  s.paths.ErrorLog(),
+		LogLevel:  s.store.LogLevel(),
 	})
 	if err != nil {
 		return err
