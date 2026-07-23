@@ -91,6 +91,67 @@ func TestShareLinkVMess(t *testing.T) {
 	}
 }
 
+func TestSocksPublicTemplateGeneratesCreds(t *testing.T) {
+	in, err := NewInboundFromTemplate("tg", "socks-public", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Protocol != "socks" || in.Listen != "0.0.0.0" {
+		t.Fatalf("socks-public should be public socks, got %s/%s", in.Protocol, in.Listen)
+	}
+	if in.SocksUser == "" || in.Password == "" {
+		t.Fatalf("public socks must auto-generate user/pass, got user=%q pass=%q", in.SocksUser, in.Password)
+	}
+}
+
+func TestSocksLoopbackNoAuth(t *testing.T) {
+	in, err := NewInboundFromTemplate("local", "socks", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Listen != "127.0.0.1" {
+		t.Fatalf("loopback socks listen = %q", in.Listen)
+	}
+	if in.SocksUser != "" {
+		t.Fatalf("loopback socks must stay no-auth, got user=%q", in.SocksUser)
+	}
+}
+
+func TestShareLinkSocksWithAuth(t *testing.T) {
+	in := Inbound{Name: "tg", Protocol: "socks", Port: 11800, SocksUser: "alice", Password: "secret"}
+	link := ShareLink(in, "1.2.3.4")
+	if !strings.HasPrefix(link, "socks://") {
+		t.Fatalf("not a socks link: %s", link)
+	}
+	creds := strings.TrimSuffix(strings.TrimPrefix(link, "socks://"), "@1.2.3.4:11800#tg")
+	dec, err := base64.StdEncoding.DecodeString(creds)
+	if err != nil || string(dec) != "alice:secret" {
+		t.Fatalf("socks userinfo bad: %q -> %q (%v)", creds, dec, err)
+	}
+}
+
+func TestShareLinkSocksNoAuth(t *testing.T) {
+	in := Inbound{Name: "local", Protocol: "socks", Port: 1080}
+	link := ShareLink(in, "1.2.3.4")
+	if link != "socks://1.2.3.4:1080#local" {
+		t.Fatalf("no-auth socks link = %q", link)
+	}
+}
+
+func TestTelegramSocksLink(t *testing.T) {
+	in := Inbound{Name: "tg", Protocol: "socks", Port: 11800, SocksUser: "alice", Password: "secret"}
+	link := TelegramSocksLink(in, "1.2.3.4")
+	for _, want := range []string{"tg://socks?", "server=1.2.3.4", "port=11800", "user=alice", "pass=secret"} {
+		if !strings.Contains(link, want) {
+			t.Errorf("tg link missing %q:\n%s", want, link)
+		}
+	}
+	// non-socks inbound has no telegram link
+	if got := TelegramSocksLink(Inbound{Protocol: "vless"}, "1.2.3.4"); got != "" {
+		t.Errorf("tg link for vless should be empty, got %q", got)
+	}
+}
+
 func TestParseTarget(t *testing.T) {
 	cases := map[string][2]string{
 		"direct":     {TargetDirect, ""},

@@ -22,7 +22,7 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
   balancer picks the winner. Nodes never listen on ports; they're outbounds ranked by live latency.
 - **Zero-restart churn** — a subscription refresh, node enable/disable, or cap change updates the
   live pool over xray's gRPC API (`ado`/`rmo`), never restarting xray or dropping connections.
-- **Server mode** — create an inbound from 15 built-in templates (vless/vmess/trojan × reality/TLS ×
+- **Server mode** — create an inbound from 16 built-in templates (vless/vmess/trojan × reality/TLS ×
   tcp/ws/grpc/xhttp/httpupgrade, plus hysteria2/QUIC) with one command; UUID, REALITY keypair, and **self-signed TLS
   certs** (via `xray tls cert`, no domain needed) are auto-generated and the client share-link + a
   scannable **QR code** are printed.
@@ -232,6 +232,25 @@ live list.
 | `trojan-tls-ws` | websocket | self-signed TLS |
 | `hysteria2` | hysteria (QUIC) | self-signed TLS — UDP, fast on lossy links |
 | `socks` | tcp (loopback) | none — local proxy |
+| `socks-public` | tcp (`0.0.0.0`) | username/password — public SOCKS5, e.g. for Telegram |
+
+### Public SOCKS5 / Telegram proxy
+
+`socks-public` exposes a public SOCKS5 listener with an auto-generated
+username/password (loopback `socks` stays no-auth for local use). Change the
+username later with `emx in edit <id>` (blank credentials regenerate on save).
+
+```bash
+emx in add tgproxy -t socks-public --host YOUR_PUBLIC_IP
+```
+
+It prints two links — pick per client:
+
+- `socks://<base64(user:pass)>@host:port#name` — import into xray / v2ray / sing-box
+- `tg://socks?server=…&port=…&user=…&pass=…` — tap into Telegram's proxy settings
+
+In the interactive menu, *Show client link* / *Show QR code* prompts which form
+you want. (MTProto proxies aren't supported — xray-core can't serve them.)
 
 ---
 

@@ -94,9 +94,42 @@ func ShareLink(in Inbound, host string) string {
 		}
 		return fmt.Sprintf("hysteria2://%s@%s:%s/?%s#%s", in.HysteriaAuth, host, port, q.Encode(), url.QueryEscape(in.Name))
 
+	case "socks":
+		// v2rayN-style socks URI: userinfo is base64(user:pass); omitted when the
+		// inbound is no-auth. Importable by xray/v2ray/sing-box clients.
+		if in.SocksUser != "" {
+			creds := base64.StdEncoding.EncodeToString([]byte(in.SocksUser + ":" + in.Password))
+			return fmt.Sprintf("socks://%s@%s:%s#%s", creds, host, port, url.QueryEscape(in.Name))
+		}
+		return fmt.Sprintf("socks://%s:%s#%s", host, port, url.QueryEscape(in.Name))
+
 	default:
 		return ""
 	}
+}
+
+// TelegramSocksLink builds a Telegram proxy deeplink (tg://socks) for a socks
+// inbound so it can be tapped into Telegram's proxy settings. host overrides
+// in.PublicHost (same resolution as ShareLink). Returns "" for non-socks
+// inbounds. User/pass are included only when the inbound has auth.
+func TelegramSocksLink(in Inbound, host string) string {
+	if in.Protocol != "socks" {
+		return ""
+	}
+	if host == "" {
+		host = in.PublicHost
+	}
+	if host == "" {
+		host = "SERVER_IP"
+	}
+	q := url.Values{}
+	q.Set("server", host)
+	q.Set("port", strconv.Itoa(in.Port))
+	if in.SocksUser != "" {
+		q.Set("user", in.SocksUser)
+		q.Set("pass", in.Password)
+	}
+	return "tg://socks?" + q.Encode()
 }
 
 // setTransportQuery adds transport-specific params (path/host/serviceName) to a

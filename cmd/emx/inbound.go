@@ -213,6 +213,9 @@ func printInboundVerb(w interface{ Write([]byte) (int, error) }, verb string, in
 	fmt.Fprintf(w, "%s inbound %q (id %d): %s on :%d → %s\n", verb, in.Name, in.Id, in.Protocol, in.Port, in.Target)
 	if withLink && in.ShareLink != "" {
 		fmt.Fprintf(w, "\nclient link:\n  %s\n", in.ShareLink)
+		if in.TgLink != "" {
+			fmt.Fprintf(w, "\nTelegram proxy link:\n  %s\n", in.TgLink)
+		}
 		if strings.Contains(in.ShareLink, "SERVER_IP") {
 			fmt.Fprintln(w, "\n(note: set --host <public-ip> to embed your real address in the link)")
 		}

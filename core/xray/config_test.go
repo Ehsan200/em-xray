@@ -72,6 +72,36 @@ func TestGenerateEntriesAndInbounds(t *testing.T) {
 	}
 }
 
+func TestBuildInboundSocksAuth(t *testing.T) {
+	inbounds := []Inbound{
+		{Name: "pub", Enabled: true, Protocol: "socks", Listen: "0.0.0.0", Port: 11800,
+			SocksUser: "alice", Password: "secret", Target: "direct"},
+	}
+	m := genMap(t, nil, inbounds)
+	ins := m["inbounds"].([]any)
+	if dig(t, ins, 0, "settings", "auth") != "password" {
+		t.Fatalf("public socks should use password auth, got %v", dig(t, ins, 0, "settings", "auth"))
+	}
+	accts := dig(t, ins, 0, "settings", "accounts").([]any)
+	if len(accts) != 1 || dig(t, accts, 0, "user") != "alice" || dig(t, accts, 0, "pass") != "secret" {
+		t.Fatalf("socks accounts wrong: %v", accts)
+	}
+}
+
+func TestBuildInboundSocksNoAuth(t *testing.T) {
+	inbounds := []Inbound{
+		{Name: "loc", Enabled: true, Protocol: "socks", Port: 11800, Target: "direct"},
+	}
+	m := genMap(t, nil, inbounds)
+	ins := m["inbounds"].([]any)
+	if dig(t, ins, 0, "settings", "auth") != "noauth" {
+		t.Fatalf("no-cred socks should be noauth, got %v", dig(t, ins, 0, "settings", "auth"))
+	}
+	if _, ok := dig(t, ins, 0, "settings").(map[string]any)["accounts"]; ok {
+		t.Fatal("noauth socks must not have accounts")
+	}
+}
+
 func TestGenerateRejectsMissingTarget(t *testing.T) {
 	inbounds := []Inbound{{Name: "x", Enabled: true, Protocol: "socks", Port: 11800, Target: "xray:ghost"}}
 	if _, err := Generate(nil, inbounds, nil, GenOptions{}); err == nil {

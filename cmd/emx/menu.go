@@ -124,13 +124,19 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 		}
 		switch i {
 		case 0:
-			if in.ShareLink != "" {
-				fmt.Println("\n" + in.ShareLink + "\n")
+			link := pickInboundLink(in)
+			if link != "" {
+				fmt.Println("\n" + link + "\n")
 			} else {
 				notify("(this protocol has no share link)")
 			}
 		case 1:
-			fmt.Printf("\n%s\n\n%s\n%s\n", in.Name, renderQR(in.ShareLink), in.ShareLink)
+			link := pickInboundLink(in)
+			if link != "" {
+				fmt.Printf("\n%s\n\n%s\n%s\n", in.Name, renderQR(link), link)
+			} else {
+				notify("(this protocol has no share link)")
+			}
 		case 2:
 			s.usersMenu(in)
 		case 3:
@@ -159,6 +165,26 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 			}
 		}
 	}
+}
+
+// pickInboundLink returns the link to show for an inbound. A public socks
+// inbound has two forms (socks:// for proxy clients, tg://socks for Telegram),
+// so it prompts the user to choose; otherwise it returns the single share link.
+func pickInboundLink(in *emxv1.InboundInfo) string {
+	if in.TgLink == "" {
+		return in.ShareLink
+	}
+	i, ok := runSelect("Which link?", []selectItem{
+		{"socks:// (proxy clients)", "xray / v2ray / sing-box"},
+		{"tg://socks (Telegram)", "tap into Telegram proxy settings"},
+	})
+	if !ok {
+		return ""
+	}
+	if i == 1 {
+		return in.TgLink
+	}
+	return in.ShareLink
 }
 
 // usersMenu manages the extra clients of an inbound.

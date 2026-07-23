@@ -104,6 +104,16 @@ var templates = map[string]Template{
 		Name: "socks", Description: "local SOCKS5 proxy (loopback)",
 		Protocol: "socks", Network: "tcp", Security: "none", Listen: "127.0.0.1",
 	},
+	"socks-public": {
+		Name: "socks-public", Description: "public SOCKS5 proxy (user/pass) — for Telegram etc.",
+		Protocol: "socks", Network: "tcp", Security: "none", Listen: "0.0.0.0",
+	},
+}
+
+// isLoopback reports whether a listen address is loopback-only (socks stays
+// private unless deliberately exposed).
+func isLoopback(listen string) bool {
+	return listen == "127.0.0.1" || listen == "::1" || listen == "localhost"
 }
 
 // TemplateByName returns a built-in template.
@@ -206,6 +216,23 @@ func Materialize(in *Inbound) error {
 				return err
 			}
 			in.HysteriaAuth = a
+		}
+	case "socks":
+		// A publicly-exposed socks inbound gets generated user/pass credentials so
+		// it is not an open proxy. Loopback socks stays no-auth (local dialer use).
+		if !isLoopback(in.Listen) && in.SocksUser == "" {
+			u, err := NewShortID(6)
+			if err != nil {
+				return err
+			}
+			in.SocksUser = u
+			if in.Password == "" {
+				p, err := NewPassword()
+				if err != nil {
+					return err
+				}
+				in.Password = p
+			}
 		}
 	}
 	if in.Security == "reality" {

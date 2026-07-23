@@ -286,6 +286,7 @@ message InboundInfo {
   string uuid = 8;
   string public_host = 9;
   string share_link = 10;
+  string tg_link = 11; // tg://socks deeplink (socks inbounds only; else empty)
 }
 message InboundReply { InboundInfo inbound = 1; }
 message InboundListReply { repeated InboundInfo inbounds = 1; }

@@ -403,5 +403,6 @@ func (s *Server) inboundInfo(in xray.Inbound) *emxv1.InboundInfo {
 		Id: uint32(in.ID), Name: in.Name, Protocol: in.Protocol, Port: int32(in.Port),
 		Security: in.Security, Target: in.Target, Enabled: in.Enabled, Uuid: in.UUID,
 		PublicHost: host, ShareLink: xray.ShareLink(in, host),
+		TgLink: xray.TelegramSocksLink(in, host),
 	}
 }

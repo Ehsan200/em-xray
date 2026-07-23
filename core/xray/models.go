@@ -112,10 +112,12 @@ type Inbound struct {
 	Enabled  bool   `gorm:"default:true"`
 
 	// Credential (auto-generated): UUID for vless/vmess, Password for trojan,
-	// HysteriaAuth for hysteria.
+	// HysteriaAuth for hysteria. For a public socks inbound SocksUser+Password are
+	// the username/password pair (blank SocksUser => no-auth socks).
 	UUID         string
 	Password     string
 	HysteriaAuth string // hysteria2 auth string (primary client)
+	SocksUser    string // socks5 username (public socks; pairs with Password)
 	Flow         string // vless flow, e.g. xtls-rprx-vision
 
 	// Transport + security.

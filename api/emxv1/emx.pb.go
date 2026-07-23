@@ -2653,6 +2653,7 @@ type InboundInfo struct {
 	Uuid          string                 `protobuf:"bytes,8,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	PublicHost    string                 `protobuf:"bytes,9,opt,name=public_host,json=publicHost,proto3" json:"public_host,omitempty"`
 	ShareLink     string                 `protobuf:"bytes,10,opt,name=share_link,json=shareLink,proto3" json:"share_link,omitempty"`
+	TgLink        string                 `protobuf:"bytes,11,opt,name=tg_link,json=tgLink,proto3" json:"tg_link,omitempty"` // tg://socks deeplink (socks inbounds only; else empty)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2753,6 +2754,13 @@ func (x *InboundInfo) GetPublicHost() string {
 func (x *InboundInfo) GetShareLink() string {
 	if x != nil {
 		return x.ShareLink
+	}
+	return ""
+}
+
+func (x *InboundInfo) GetTgLink() string {
+	if x != nil {
+		return x.TgLink
 	}
 	return ""
 }
@@ -3280,7 +3288,7 @@ const file_emx_proto_rawDesc = "" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x12\x1f\n" +
 	"\vpublic_host\x18\x04 \x01(\tR\n" +
 	"publicHost\x12\x12\n" +
-	"\x04port\x18\x05 \x01(\x05R\x04port\"\x83\x02\n" +
+	"\x04port\x18\x05 \x01(\x05R\x04port\"\x9c\x02\n" +
 	"\vInboundInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -3294,7 +3302,8 @@ const file_emx_proto_rawDesc = "" +
 	"publicHost\x12\x1d\n" +
 	"\n" +
 	"share_link\x18\n" +
-	" \x01(\tR\tshareLink\"=\n" +
+	" \x01(\tR\tshareLink\x12\x17\n" +
+	"\atg_link\x18\v \x01(\tR\x06tgLink\"=\n" +
 	"\fInboundReply\x12-\n" +
 	"\ainbound\x18\x01 \x01(\v2\x13.emx.v1.InboundInfoR\ainbound\"C\n" +
 	"\x10InboundListReply\x12/\n" +

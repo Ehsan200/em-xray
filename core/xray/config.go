@@ -231,7 +231,12 @@ func buildInbound(in Inbound) (map[string]any, error) {
 
 	switch in.Protocol {
 	case "socks":
-		ib["settings"] = map[string]any{"udp": true, "auth": "noauth"}
+		set := map[string]any{"udp": true, "auth": "noauth"}
+		if in.SocksUser != "" {
+			set["auth"] = "password"
+			set["accounts"] = []any{map[string]any{"user": in.SocksUser, "pass": in.Password}}
+		}
+		ib["settings"] = set
 		return ib, nil // socks has no transport/security
 	case "vless":
 		ib["settings"] = map[string]any{"clients": inboundClients(in), "decryption": "none"}
