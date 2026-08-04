@@ -159,6 +159,14 @@ func (s *Store) NodeNameByFingerprint(fp string) string {
 	return fp
 }
 
+// SetNodeLatency records a node's last measured round-trip (0 = unknown/failed).
+// Keyed by fingerprint so it survives the volatile row churn of a refresh.
+func (s *Store) SetNodeLatency(subID uint, fingerprint string, ms int) error {
+	return s.db.Model(&SubNode{}).
+		Where("sub_id = ? AND fingerprint = ?", subID, fingerprint).
+		Update("last_latency_ms", ms).Error
+}
+
 // DisabledFingerprints returns the set of node fingerprints a subscription has a
 // durable disable-override for.
 func (s *Store) DisabledFingerprints(subID uint) (map[string]bool, error) {

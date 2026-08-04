@@ -30,6 +30,11 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
   an optional **byte cap**; a user that hits their quota is dropped from the config automatically.
 - **Traffic charts** — per-inbound/outbound byte totals (24h / all-time) as terminal sparklines, a
   **live ↑/↓ speed meter**, and per-user usage. xray's stats API is sampled into hourly buckets.
+- **Per-config latency test** — `emx sub test` / `emx entry test` measure the *real* round trip
+  through each config: a throwaway xray is started with one loopback socks inbound per config and the
+  probe URL is fetched through each, concurrently. Node results are persisted and shown in the lists.
+- **Restart levers** — `emx restart --xray` (or `emx xray restart`) force-cycles just the xray child
+  when it wedges; `emx restart` bounces the whole daemon. Both are in the TUI under *Restart*.
 - **Backup / restore** — export the whole config (inbounds + entries + subscriptions) to one JSON
   file and import it back, merge or replace.
 - **Self-managed daemon** — `emx start` detaches into the background, supervises the xray child, and
@@ -164,6 +169,7 @@ gets its own slot + balancer.
 
 ```
 emx start | stop | restart | status        daemon lifecycle
+emx restart --xray                          cycle only the xray child (keeps the daemon)
 emx version                                 emx + embedded xray versions
 
 emx sub add <name> <url>                    add + fetch a subscription
@@ -175,10 +181,12 @@ emx sub refresh [id]                        refresh one (or all); reports +added
 emx sub nodes <id>                          list nodes (fingerprint, active, disabled, latency)
 emx sub node-disable <subid> <fingerprint>  durable — survives refresh/restart
 emx sub node-enable  <subid> <fingerprint>
+emx sub test <id> [fingerprint]             real latency per node (persisted; all nodes if no fp)
 
 emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>]
 emx entry ls | rm <id> | rename <id> <name>
 emx entry duplicate <id> [name] | edit <id>            clone / edit outbound JSON in $EDITOR
+emx entry test [id]                         real latency through an entry (all entries if omitted)
 
 emx in add [name] [--template T] [--to TARGET] [--host H] [--port N]
 emx in ls [--links] | rm <id>
@@ -199,6 +207,7 @@ emx xray config                             print the generated xray config.json
 emx xray logs [-a] [-n N] [-f]              tail xray's error (or --access) log
 emx xray logcap [MB]                        per-file log size cap (0 disables; default 50)
 emx xray paths                              show the XDG paths in use
+emx xray restart                            regenerate the config + restart the xray child
 emx loglevel [debug|info|warning|error|none]   show or change the xray log level
 
 emx template ls                             built-in inbound presets
@@ -271,6 +280,22 @@ One shared observatory (`subjectSelector: ["slot"]`) probes every member. Becaus
 `slotN-out-` tag **prefix**, the balancer and observatory adopt live-added members with no config
 reload — that's the zero-restart trick. A subscription refresh diffs the pool and applies the delta
 with `xray api ado/rmo`; only a change to the *set* of masters triggers a full config regen + restart.
+
+### Testing configs
+
+`emx sub test <id>` / `emx entry test [id]` never touch the live xray. Each run writes a throwaway
+config with one no-auth socks inbound on an ephemeral loopback port per config, routed straight to
+that config's outbound (a master's `dialerProxy` hop is stripped — the probe measures the server
+itself), starts its own xray, and fetches the probe URL through every port concurrently. The reported
+number is the full round trip (dial + handshake + response).
+
+Configs are probed in batches of 24; if xray refuses to start for a batch — one outbound it won't
+accept — the batch is split in half and retried, so the failure lands on the config that caused it
+instead of its neighbours. Node latencies are persisted by fingerprint, so `emx sub nodes` and the
+TUI show the last measurement; a failed probe clears the old figure rather than keeping a stale one.
+
+Note this is a *different* measurement from `emx winner`: that reflects xray's own observatory probes
+driving the `leastPing` balancer for live routing.
 
 ### Traffic accounting
 

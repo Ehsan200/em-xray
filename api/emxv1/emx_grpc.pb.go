@@ -22,6 +22,8 @@ const (
 	Daemon_Ping_FullMethodName                  = "/emx.v1.Daemon/Ping"
 	Daemon_Status_FullMethodName                = "/emx.v1.Daemon/Status"
 	Daemon_Shutdown_FullMethodName              = "/emx.v1.Daemon/Shutdown"
+	Daemon_XrayRestart_FullMethodName           = "/emx.v1.Daemon/XrayRestart"
+	Daemon_Test_FullMethodName                  = "/emx.v1.Daemon/Test"
 	Daemon_XrayConfig_FullMethodName            = "/emx.v1.Daemon/XrayConfig"
 	Daemon_LogLevel_FullMethodName              = "/emx.v1.Daemon/LogLevel"
 	Daemon_LogCap_FullMethodName                = "/emx.v1.Daemon/LogCap"
@@ -71,6 +73,8 @@ type DaemonClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusReply, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownReply, error)
 	// Diagnostics / settings.
+	XrayRestart(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*XrayRestartReply, error)
+	Test(ctx context.Context, in *TestRequest, opts ...grpc.CallOption) (*TestReply, error)
 	XrayConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error)
 	LogLevel(ctx context.Context, in *LogLevelRequest, opts ...grpc.CallOption) (*LogLevelReply, error)
 	LogCap(ctx context.Context, in *LogCapRequest, opts ...grpc.CallOption) (*LogCapReply, error)
@@ -151,6 +155,26 @@ func (c *daemonClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts .
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ShutdownReply)
 	err := c.cc.Invoke(ctx, Daemon_Shutdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) XrayRestart(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*XrayRestartReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(XrayRestartReply)
+	err := c.cc.Invoke(ctx, Daemon_XrayRestart_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) Test(ctx context.Context, in *TestRequest, opts ...grpc.CallOption) (*TestReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TestReply)
+	err := c.cc.Invoke(ctx, Daemon_Test_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -528,6 +552,8 @@ type DaemonServer interface {
 	Status(context.Context, *StatusRequest) (*StatusReply, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownReply, error)
 	// Diagnostics / settings.
+	XrayRestart(context.Context, *Empty) (*XrayRestartReply, error)
+	Test(context.Context, *TestRequest) (*TestReply, error)
 	XrayConfig(context.Context, *Empty) (*ConfigReply, error)
 	LogLevel(context.Context, *LogLevelRequest) (*LogLevelReply, error)
 	LogCap(context.Context, *LogCapRequest) (*LogCapReply, error)
@@ -592,6 +618,12 @@ func (UnimplementedDaemonServer) Status(context.Context, *StatusRequest) (*Statu
 }
 func (UnimplementedDaemonServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedDaemonServer) XrayRestart(context.Context, *Empty) (*XrayRestartReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method XrayRestart not implemented")
+}
+func (UnimplementedDaemonServer) Test(context.Context, *TestRequest) (*TestReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Test not implemented")
 }
 func (UnimplementedDaemonServer) XrayConfig(context.Context, *Empty) (*ConfigReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method XrayConfig not implemented")
@@ -772,6 +804,42 @@ func _Daemon_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).Shutdown(ctx, req.(*ShutdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_XrayRestart_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).XrayRestart(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_XrayRestart_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).XrayRestart(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_Test_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Test(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Test_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Test(ctx, req.(*TestRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1442,6 +1510,14 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Shutdown",
 			Handler:    _Daemon_Shutdown_Handler,
+		},
+		{
+			MethodName: "XrayRestart",
+			Handler:    _Daemon_XrayRestart_Handler,
+		},
+		{
+			MethodName: "Test",
+			Handler:    _Daemon_Test_Handler,
 		},
 		{
 			MethodName: "XrayConfig",

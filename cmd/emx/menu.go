@@ -12,10 +12,20 @@ import (
 )
 
 // menuSession holds a live daemon connection for a run of interactive menus.
-type menuSession struct{ c emxv1.DaemonClient }
+// cmd is kept so a daemon restart can respawn the detached process.
+type menuSession struct {
+	c   emxv1.DaemonClient
+	cmd *cobra.Command
+}
 
 func call() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 15*time.Second)
+}
+
+// testCall is the long deadline for probe runs: each batch starts its own xray
+// before its (concurrent) probes.
+func testCall() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), testTimeout)
 }
 
 // runMenu opens a connection and dispatches to the requested section's menu.
@@ -30,7 +40,7 @@ func runMenu(cmd *cobra.Command, section string) error {
 		return errDaemon(err)
 	}
 	defer conn.Close()
-	s := &menuSession{c: c}
+	s := &menuSession{c: c, cmd: cmd}
 	switch section {
 	case "main":
 		s.mainMenu()
@@ -53,9 +63,10 @@ func (s *menuSession) mainMenu() {
 			{"Traffic", "per-inbound/outbound usage + charts"},
 			{"Templates", "view built-in inbound presets"},
 			{"Status", "daemon & xray health"},
+			{"Restart", "cycle xray or the whole daemon"},
 			{"Quit", ""},
 		})
-		if !ok || i == 6 {
+		if !ok || i == 7 {
 			return
 		}
 		switch i {
@@ -71,8 +82,48 @@ func (s *menuSession) mainMenu() {
 			s.templatesView()
 		case 5:
 			s.statusView()
+		case 6:
+			if s.restartMenu() {
+				return // the daemon was restarted — this connection is dead
+			}
 		}
 	}
+}
+
+// restartMenu offers the two recovery levers. Returns true when the menu must
+// close: a daemon restart drops the socket this session is talking over.
+func (s *menuSession) restartMenu() (quit bool) {
+	i, ok := runSelect("Restart", []selectItem{
+		{"Restart xray", "regenerate the config and cycle the child — fixes a wedged xray"},
+		{"Restart daemon", "full restart; closes this menu"},
+		{"← Back", ""},
+	})
+	if !ok || i == 2 {
+		return false
+	}
+	if i == 0 {
+		notify("restarting xray…")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		reply, err := s.c.XrayRestart(ctx, &emxv1.Empty{})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+		} else if reply.Running {
+			notify("%s (pid %d)", reply.Message, reply.Pid)
+		} else {
+			notify("%s", reply.Message)
+		}
+		return false
+	}
+	if !confirm("Restart the daemon? (this closes the menu)") {
+		return false
+	}
+	if err := restartDaemon(s.cmd); err != nil {
+		notify("error: %v", err)
+		return false
+	}
+	notify("daemon restarted — run `emx` again")
+	return true
 }
 
 // ---- inbounds --------------------------------------------------------------
@@ -428,6 +479,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 		i, ok := runSelect(fmt.Sprintf("Subscription: %s (%d active)", sub.Name, sub.ActiveCount), []selectItem{
 			{"View metadata", ""},
 			{"View / toggle nodes", ""},
+			{"Test all nodes", "measure real latency through every node"},
 			{"Refresh now", ""},
 			{"Refresh interval / cap", ""},
 			{toggle, ""},
@@ -435,7 +487,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 7 {
+		if !ok || i == 8 {
 			return
 		}
 		switch i {
@@ -444,6 +496,8 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 		case 1:
 			s.nodesMenu(sub)
 		case 2:
+			s.testSub(sub)
+		case 3:
 			notify("refreshing…")
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			r, err := s.c.SubRefresh(ctx, &emxv1.SubRefreshRequest{Id: sub.Id})
@@ -455,9 +509,9 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				notify("refreshed: %d nodes (+%d -%d)", r.Nodes, r.Added, r.Removed)
 			}
-		case 3:
-			s.subSetOptions(sub)
 		case 4:
+			s.subSetOptions(sub)
+		case 5:
 			ctx, cancel := call()
 			_, err := s.c.SubSetEnabled(ctx, &emxv1.SetEnabledRequest{Id: sub.Id, Enabled: !sub.Enabled})
 			cancel()
@@ -466,7 +520,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				sub.Enabled = !sub.Enabled
 			}
-		case 5:
+		case 6:
 			name, ok := runInput("New name", sub.Name)
 			if !ok || name == "" || name == sub.Name {
 				break
@@ -480,7 +534,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 				notify("renamed to %s", name)
 				sub.Name = name
 			}
-		case 6:
+		case 7:
 			if confirm("Remove subscription " + sub.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.SubRemove(ctx, &emxv1.IdRequest{Id: sub.Id})
@@ -529,6 +583,24 @@ func (s *menuSession) subSetOptions(sub *emxv1.SubInfo) {
 	notify("updated: interval %s, cap %s", intervalLine(sub.IntervalSec), capLine(sub.NodeCap))
 }
 
+// testSub probes every node of a subscription and prints the table (latencies
+// are persisted daemon-side, so the node list shows them afterwards).
+func (s *menuSession) testSub(sub *emxv1.SubInfo) {
+	notify("testing %s — this takes a while for a big pool…", sub.Name)
+	ctx, cancel := testCall()
+	reply, err := s.c.Test(ctx, &emxv1.TestRequest{Kind: "sub", Id: sub.Id})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	if len(reply.Results) == 0 {
+		notify("no nodes — refresh the subscription first")
+		return
+	}
+	fmt.Print("\n" + testResultLines(reply.Results, true) + "\n")
+}
+
 func (s *menuSession) nodesMenu(sub *emxv1.SubInfo) {
 	for {
 		ctx, cancel := call()
@@ -556,25 +628,61 @@ func (s *menuSession) nodesMenu(sub *emxv1.SubInfo) {
 			}
 			items = append(items, selectItem{label: fmt.Sprintf("%s %s", icon, n.Name), desc: lat})
 		}
-		items = append(items, selectItem{label: "← Back"})
+		items = append(items, selectItem{label: "⚡ Test all nodes"}, selectItem{label: "← Back"})
 
 		i, ok := runSelect(fmt.Sprintf("%s — nodes (✓ active · ✗ disabled)", sub.Name), items)
 		if !ok || i == len(items)-1 {
 			return
 		}
-		n := reply.Nodes[i]
-		ctx, cancel = call()
-		_, err = s.c.SubSetNodeDisabled(ctx, &emxv1.SubNodeDisabledRequest{
-			SubId: sub.Id, Fingerprint: n.Fingerprint, Disabled: !n.Disabled,
-		})
+		if i == len(items)-2 {
+			s.testSub(sub)
+			continue
+		}
+		s.nodeActions(sub, reply.Nodes[i])
+	}
+}
+
+// nodeActions is the per-node menu: test just this node, or toggle it.
+func (s *menuSession) nodeActions(sub *emxv1.SubInfo, n *emxv1.NodeInfo) {
+	toggle := "Disable"
+	if n.Disabled {
+		toggle = "Enable"
+	}
+	title := n.Name
+	if n.LatencyMs > 0 {
+		title += fmt.Sprintf(" (%dms)", n.LatencyMs)
+	}
+	i, ok := runSelect("Node: "+title, []selectItem{
+		{"Test", "measure real latency through this node"},
+		{toggle, "durable — survives a refresh"},
+		{"← Back", ""},
+	})
+	if !ok || i == 2 {
+		return
+	}
+	if i == 0 {
+		notify("testing %s…", n.Name)
+		ctx, cancel := testCall()
+		reply, err := s.c.Test(ctx, &emxv1.TestRequest{Kind: "node", Id: sub.Id, Fingerprint: n.Fingerprint})
 		cancel()
 		if err != nil {
 			notify("error: %v", err)
-		} else if n.Disabled {
-			notify("enabled %s", n.Name)
 		} else {
-			notify("disabled %s", n.Name)
+			notify("%s", testSummary(reply.Results))
 		}
+		return
+	}
+	ctx, cancel := call()
+	_, err := s.c.SubSetNodeDisabled(ctx, &emxv1.SubNodeDisabledRequest{
+		SubId: sub.Id, Fingerprint: n.Fingerprint, Disabled: !n.Disabled,
+	})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+	} else if n.Disabled {
+		notify("enabled %s", n.Name)
+	} else {
+		notify("disabled %s", n.Name)
 	}
 }
 
@@ -617,13 +725,24 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 		kind = "master → " + e.Dialer
 	}
 	i, ok := runSelect(fmt.Sprintf("%s (%s)", e.Name, kind), []selectItem{
+		{"Test", "measure real latency through this outbound"},
 		{"Rename", ""}, {"Duplicate", ""}, {"Edit JSON", ""}, {"Remove", ""}, {"← Back", ""},
 	})
-	if !ok || i == 4 {
+	if !ok || i == 5 {
 		return
 	}
 	switch i {
 	case 0:
+		notify("testing %s…", e.Name)
+		ctx, cancel := testCall()
+		reply, err := s.c.Test(ctx, &emxv1.TestRequest{Kind: "entry", Id: e.Id})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+		} else {
+			notify("%s", testSummary(reply.Results))
+		}
+	case 1:
 		name, ok := runInput("New name", e.Name)
 		if !ok || name == "" || name == e.Name {
 			return
@@ -636,7 +755,7 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 		} else {
 			notify("renamed to %s", name)
 		}
-	case 1:
+	case 2:
 		name, _ := runInput("Name for the copy", e.Name+" copy")
 		ctx, cancel := call()
 		reply, err := s.c.EntryDuplicate(ctx, &emxv1.DuplicateRequest{Id: e.Id, NewName: name})
@@ -646,9 +765,9 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 		} else {
 			notify("duplicated to %s", reply.Entry.Name)
 		}
-	case 2:
-		s.editConfig("entry", e.Id)
 	case 3:
+		s.editConfig("entry", e.Id)
+	case 4:
 		if confirm("Remove entry " + e.Name + "?") {
 			ctx, cancel := call()
 			_, err := s.c.EntryRemove(ctx, &emxv1.IdRequest{Id: e.Id})

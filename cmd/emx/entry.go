@@ -18,7 +18,7 @@ func entryCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "entry") },
 	}
 	c.AddCommand(entryAddCmd(), entryListCmd(), entryRemoveCmd(), entryRenameCmd(),
-		entryDuplicateCmd(), entryEditCmd())
+		entryDuplicateCmd(), entryEditCmd(), entryTestCmd())
 	return c
 }
 

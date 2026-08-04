@@ -12,6 +12,8 @@ service Daemon {
   rpc Shutdown(ShutdownRequest) returns (ShutdownReply);
 
   // Diagnostics / settings.
+  rpc XrayRestart(Empty) returns (XrayRestartReply);  // regenerate config + restart the xray child
+  rpc Test(TestRequest) returns (TestReply);          // measure real latency through configs
   rpc XrayConfig(Empty) returns (ConfigReply);        // the generated xray config.json
   rpc LogLevel(LogLevelRequest) returns (LogLevelReply); // set (non-empty) and/or read
   rpc LogCap(LogCapRequest) returns (LogCapReply);       // per-file log size cap (MB)
@@ -67,6 +69,32 @@ service Daemon {
   rpc SubRename(RenameRequest) returns (Empty);
   rpc SubSetOptions(SubOptionsRequest) returns (SubReply);
 }
+
+// XrayRestartReply reports the state after the restart request.
+message XrayRestartReply {
+  bool running = 1;   // false when nothing is routable (xray stays down)
+  int32 pid = 2;
+  string message = 3;
+}
+
+// TestRequest measures the real round-trip latency through one or more configs
+// by running a throwaway xray with a loopback socks inbound per config and
+// fetching url through it.
+message TestRequest {
+  string kind = 1;        // entry | entries | sub | node
+  uint32 id = 2;          // entry id (kind=entry) or subscription id (kind=sub|node)
+  string fingerprint = 3; // kind=node: which node of the subscription
+  int32 timeout_sec = 4;  // per-probe timeout; 0 => 10s
+  string url = 5;         // probe URL; "" => the observatory default
+}
+message TestResult {
+  uint32 id = 1;          // entry id (0 for subscription nodes)
+  string name = 2;
+  string fingerprint = 3; // "" for entries
+  int32 latency_ms = 4;   // 0 when error is non-empty
+  string error = 5;
+}
+message TestReply { repeated TestResult results = 1; }
 
 // SubOptionsRequest changes a subscription's refresh cadence / cap / UA.
 message SubOptionsRequest {

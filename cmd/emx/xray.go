@@ -22,8 +22,16 @@ func xrayCmd() *cobra.Command {
 		Use:   "xray",
 		Short: "inspect the running xray: config json, logs, paths",
 	}
-	c.AddCommand(xrayConfigCmd(), xrayLogsCmd(), xrayPathsCmd(), xrayLogCapCmd())
+	c.AddCommand(xrayConfigCmd(), xrayLogsCmd(), xrayPathsCmd(), xrayLogCapCmd(), xrayRestartCmd())
 	return c
+}
+
+// xrayRestartCmd force-cycles the xray child without touching the daemon.
+func xrayRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "restart", Short: "regenerate the config and restart the xray child",
+		RunE: func(cmd *cobra.Command, _ []string) error { return restartXray(cmd) },
+	}
 }
 
 func xrayLogCapCmd() *cobra.Command {

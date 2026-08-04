@@ -151,6 +151,41 @@ func toLoaded(slots []xray.Slot) map[string]loadedSlot {
 // Stop terminates the xray child and its supervisor loop.
 func (s *Supervisor) Stop() { s.wd.Stop(5 * time.Second) }
 
+// RestartXray force-cycles the xray child: it stops the current process (and
+// its supervise loop), regenerates config.json from current state, and starts
+// fresh. Unlike Reconcile it never no-ops — this is the escape hatch for a
+// wedged xray (balancer stuck, listeners not answering), so it must not depend
+// on anything having changed. Returns the post-restart running state.
+func (s *Supervisor) RestartXray() (bool, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Full stop first so a hung child is signalled (and killed after the grace
+	// period) rather than merely asked to reload.
+	s.wd.Stop(5 * time.Second)
+	s.loadedSlots = map[string]loadedSlot{}
+	if err := s.reconcileLocked(); err != nil {
+		return false, 0, err
+	}
+	if !s.wd.IsStarted() {
+		return false, 0, nil // nothing routable — xray intentionally stays down
+	}
+	// The supervise loop spawns asynchronously; give it a moment to report a pid.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		running, pid, _, lastErr := s.wd.State()
+		if running {
+			return true, pid, nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr != "" {
+				return false, 0, fmt.Errorf("%s", lastErr)
+			}
+			return false, 0, fmt.Errorf("xray did not come up within 5s")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // XrayState exposes child health for the Status RPC.
 func (s *Supervisor) XrayState() (running bool, pid int, restarts int32, lastErr string) {
 	return s.wd.State()

@@ -23,7 +23,7 @@ func subCmd() *cobra.Command {
 		subEnableCmd(true), subEnableCmd(false),
 		subRefreshCmd(), subNodesCmd(),
 		subNodeDisableCmd(true), subNodeDisableCmd(false),
-		subRenameCmd(), subInfoCmd(), subSetCmd(),
+		subRenameCmd(), subInfoCmd(), subSetCmd(), subTestCmd(),
 	)
 	return c
 }

@@ -113,11 +113,37 @@ func stopCmd() *cobra.Command {
 }
 
 func restartCmd() *cobra.Command {
-	return &cobra.Command{
+	var xrayOnly bool
+	c := &cobra.Command{
 		Use:   "restart",
-		Short: "restart the background daemon",
-		RunE:  func(cmd *cobra.Command, _ []string) error { return restartDaemon(cmd) },
+		Short: "restart the background daemon (or just the xray child with --xray)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if xrayOnly {
+				return restartXray(cmd)
+			}
+			return restartDaemon(cmd)
+		},
 	}
+	c.Flags().BoolVar(&xrayOnly, "xray", false, "only cycle the xray child (keeps the daemon and its socket)")
+	return c
+}
+
+// restartXray asks the running daemon to regenerate config.json and force-cycle
+// the xray child. Cheaper than a daemon restart and enough to clear a wedged
+// xray (stuck balancer, listeners that stopped answering).
+func restartXray(cmd *cobra.Command) error {
+	return withClientTimeout(cmd, 30*time.Second, func(ctx context.Context, cl emxv1.DaemonClient) error {
+		reply, err := cl.XrayRestart(ctx, &emxv1.Empty{})
+		if err != nil {
+			return err
+		}
+		if reply.Running {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s (pid %d)\n", reply.Message, reply.Pid)
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), reply.Message)
+		}
+		return nil
+	})
 }
 
 // restartDaemon stops the running daemon (graceful RPC, then re-spawns). Spawns
