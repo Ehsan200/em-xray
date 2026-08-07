@@ -281,6 +281,24 @@ One shared observatory (`subjectSelector: ["slot"]`) probes every member. Becaus
 reload — that's the zero-restart trick. A subscription refresh diffs the pool and applies the delta
 with `xray api ado/rmo`; only a change to the *set* of masters triggers a full config regen + restart.
 
+### Fail closed, never direct
+
+An inbound routed through a master or an entry must **never** egress from this box's own IP. Only a
+`direct` target may do that, and the daemon names every such inbound in the log on each reconcile so
+it can't happen by accident. Four rules keep that true:
+
+- **`block` is `outbounds[0]`.** xray takes the first outbound as its default handler — the one used
+  whenever routing yields no tag. A blackhole there makes any routing miss fail closed; `direct`
+  stays in the list but is reachable only by explicit tag.
+- **Every balancer carries `fallbackTag: "block"`.** `leastPing` picks nothing until the observatory
+  has marked at least one member alive — a window after every start, and after a refresh replaces the
+  whole pool. Without the fallback that window drops to the default handler.
+- **An enabled master always gets a slot**, even when its dialer resolves to zero members (sub not
+  fetched yet, all nodes inactive, a dangling ref). Dropping the slot would strip the `dialerProxy`
+  hop and let the master dial straight off this box.
+- **Live member sync adds before it removes.** A refresh that rotates every fingerprint is a full
+  replace; removing first would empty the pool mid-flight.
+
 ### Testing configs
 
 `emx sub test <id>` / `emx entry test [id]` never touch the live xray. Each run writes a throwaway

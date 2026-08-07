@@ -95,6 +95,17 @@ func (s *Supervisor) reconcileLocked() error {
 	for i := range inbounds {
 		inbounds[i].Users = s.activeUsers(inbounds[i].ID)
 	}
+	// A direct inbound egresses from this box's own IP. That is a legitimate
+	// configuration, but never one to discover by accident — name them on every
+	// reconcile so the choice stays visible in the log.
+	for _, in := range inbounds {
+		if !in.Enabled {
+			continue
+		}
+		if kind, _, err := xray.ParseTarget(in.Target); err == nil && kind == xray.TargetDirect {
+			s.log.Printf("inbound %q targets direct — its traffic egresses from this server's own IP", in.Name)
+		}
+	}
 
 	slots, err := s.resolveDialerSlots(entries)
 	if err != nil {
@@ -193,9 +204,15 @@ func (s *Supervisor) XrayState() (running bool, pid int, restarts int32, lastErr
 
 // resolveDialerSlots resolves each enabled master's Dialer refs into concrete
 // pool members right now: xray: refs → the named entry's outbound; xraysub:
-// refs → the subscription's ACTIVE nodes. Members dedupe by content Key. A
-// master resolving to zero members gets no slot (it routes direct until a
-// refresh populates its pool). proxy: refs are not yet supported.
+// refs → the subscription's ACTIVE nodes. Members dedupe by content Key.
+// proxy: refs are not yet supported.
+//
+// Every enabled master gets a slot, INCLUDING one that resolves to zero members
+// (sub not fetched yet, all nodes inactive, a bad ref). Dropping the slot would
+// strip the master's dialerProxy and make it dial straight off this box —
+// leaking the server's IP exactly when the pool is unavailable. An empty slot
+// keeps the dialerProxy wired to a balancer that has nothing to pick, which
+// falls back to `block`: the master fails closed until the pool fills.
 func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, error) {
 	byName := make(map[string]xray.XrayEntry, len(entries))
 	for _, e := range entries {
@@ -209,7 +226,11 @@ func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, 
 		}
 		refs, err := xray.ParseDialer(e.Dialer)
 		if err != nil {
-			s.log.Printf("master %q: bad dialer: %v", e.Name, err)
+			// Unparseable dialer still yields an empty slot, not no slot: the
+			// master must stay behind the (empty → blocking) balancer rather
+			// than fall back to dialing off this box.
+			s.log.Printf("master %q: bad dialer: %v — pool empty, master blocked", e.Name, err)
+			slots = append(slots, xray.Slot{Master: e.Name})
 			continue
 		}
 		var members []xray.SlotMember
@@ -243,9 +264,10 @@ func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, 
 				// proxy upstreams not yet modelled — skipped.
 			}
 		}
-		if len(members) > 0 {
-			slots = append(slots, xray.Slot{Master: e.Name, Members: members})
+		if len(members) == 0 {
+			s.log.Printf("master %q: dialer resolved to 0 members — master blocked until pool fills", e.Name)
 		}
+		slots = append(slots, xray.Slot{Master: e.Name, Members: members})
 	}
 	return slots, nil
 }

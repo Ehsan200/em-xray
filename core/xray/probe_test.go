@@ -34,10 +34,17 @@ func TestBuildProbeConfig(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Inbounds) != 2 || len(cfg.Outbounds) != 2 || len(cfg.Routing.Rules) != 2 {
-		t.Fatalf("want 2 of each, got %d inbounds / %d outbounds / %d rules",
+	// Outbounds carry a leading blackhole (xray's default handler) on top of the
+	// per-item ones, so a routing miss fails instead of being attributed to
+	// whichever node happened to be first.
+	if len(cfg.Inbounds) != 2 || len(cfg.Outbounds) != 3 || len(cfg.Routing.Rules) != 2 {
+		t.Fatalf("want 2 inbounds / 3 outbounds / 2 rules, got %d / %d / %d",
 			len(cfg.Inbounds), len(cfg.Outbounds), len(cfg.Routing.Rules))
 	}
+	if cfg.Outbounds[0]["tag"] != "block" || cfg.Outbounds[0]["protocol"] != "blackhole" {
+		t.Fatalf("first probe outbound must be the blackhole default, got %v", cfg.Outbounds[0])
+	}
+	itemOutbounds := cfg.Outbounds[1:]
 	for i, in := range cfg.Inbounds {
 		if in.Listen != "127.0.0.1" {
 			t.Errorf("inbound %d listens on %q, want loopback only", i, in.Listen)
@@ -51,7 +58,7 @@ func TestBuildProbeConfig(t *testing.T) {
 	}
 	// Each inbound must route to its OWN outbound, else results get crossed.
 	for i, r := range cfg.Routing.Rules {
-		wantIn, wantOut := cfg.Inbounds[i].Tag, cfg.Outbounds[i]["tag"]
+		wantIn, wantOut := cfg.Inbounds[i].Tag, itemOutbounds[i]["tag"]
 		if len(r.InboundTag) != 1 || r.InboundTag[0] != wantIn || r.OutboundTag != wantOut {
 			t.Errorf("rule %d: %v → %q, want [%s] → %q", i, r.InboundTag, r.OutboundTag, wantIn, wantOut)
 		}

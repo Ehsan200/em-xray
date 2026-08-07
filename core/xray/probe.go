@@ -217,7 +217,12 @@ func BuildProbeConfig(items []ProbeItem, ports []int) ([]byte, error) {
 		return nil, fmt.Errorf("probe config: %d items but %d ports", len(items), len(ports))
 	}
 	inbounds := make([]any, 0, len(items))
-	outbounds := make([]any, 0, len(items))
+	// A blackhole leads the outbounds so it is xray's default handler: a probe
+	// whose routing rule somehow misses must fail, not silently fall through to
+	// the first item's outbound (a wrong latency attributed to the wrong node)
+	// or out this box's own interface.
+	outbounds := make([]any, 0, len(items)+1)
+	outbounds = append(outbounds, map[string]any{"tag": "block", "protocol": "blackhole"})
 	rules := make([]any, 0, len(items))
 	for i, it := range items {
 		inTag, outTag := fmt.Sprintf("probe-in-%d", i), fmt.Sprintf("probe-out-%d", i)

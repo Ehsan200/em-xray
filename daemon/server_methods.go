@@ -360,7 +360,7 @@ func (s *Server) InboundSetConfig(ctx context.Context, req *emxv1.SetConfigReque
 	// Preserve identity: the id and created-at can't be changed by an edit.
 	edited.ID = cur.ID
 	edited.CreatedAt = cur.CreatedAt
-	if _, _, err := xray.ParseTarget(edited.Target); err != nil {
+	if edited.Target, err = xray.CanonicalTarget(edited.Target); err != nil {
 		return nil, err
 	}
 	if err := xray.Materialize(&edited); err != nil {

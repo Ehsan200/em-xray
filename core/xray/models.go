@@ -199,6 +199,22 @@ func ParseTarget(t string) (kind, name string, err error) {
 	}
 }
 
+// CanonicalTarget normalizes a Target to its stored form, turning the blank
+// spelling of "direct" into the literal word. Blank and "direct" route
+// identically, but only one of them is legible: an inbound that egresses from
+// this box's own IP must say so on its row, in `in ls`, and in its config JSON,
+// so it is never mistaken for a tunnelled one.
+func CanonicalTarget(t string) (string, error) {
+	kind, name, err := ParseTarget(t)
+	if err != nil {
+		return "", err
+	}
+	if kind == TargetDirect {
+		return TargetDirect, nil
+	}
+	return kind + ":" + name, nil
+}
+
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9 ._-]+$`)
 
 // NormalizeName trims and collapses internal whitespace.

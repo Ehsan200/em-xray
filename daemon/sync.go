@@ -43,9 +43,16 @@ func (s *Supervisor) syncLocked() error {
 }
 
 // applyMemberDeltaLocked converges each slot's live members to desired via
-// rmo/ado. loadedSlots is advanced PER SLOT after that slot succeeds, so a
+// ado/rmo. loadedSlots is advanced PER SLOT after that slot succeeds, so a
 // mid-way failure still records the slots that converged; the next sync retries
 // only the rest. Callers must hold s.mu.
+//
+// ADDITIONS GO FIRST, REMOVALS SECOND, and that order is a security property.
+// A refresh that rotates every node fingerprint is a full replace; removing
+// first would empty the pool, and until the observatory probes the replacements
+// the balancer has nothing alive to pick. Adding first means the slot is never
+// empty, so the master never falls through to the blocking fallback (and, before
+// that fallback existed, never leaked out this box's IP).
 func (s *Supervisor) applyMemberDeltaLocked(desired []xray.Slot) error {
 	for _, sl := range desired {
 		ls := s.loadedSlots[sl.Master]
@@ -54,16 +61,8 @@ func (s *Supervisor) applyMemberDeltaLocked(desired []xray.Slot) error {
 			continue
 		}
 
-		// Removals first. "Already gone" is tolerated — log and keep going.
-		var rmTags []string
-		for _, k := range removeKeys {
-			rmTags = append(rmTags, xray.SlotMemberTag(ls.idx, k))
-		}
-		if err := s.apiRemoveOutbounds(rmTags...); err != nil {
-			s.log.Printf("sync %q: rmo (tolerated): %v", sl.Master, err)
-		}
-
-		// Additions: write one-outbound files, then ado them.
+		// Additions: write one-outbound files, then ado them. On failure bail
+		// BEFORE removing anything, so the old pool keeps serving.
 		files, err := s.writeMemberFiles(ls.idx, adds)
 		if err != nil {
 			s.log.Printf("sync %q: write member files: %v", sl.Master, err)
@@ -72,6 +71,15 @@ func (s *Supervisor) applyMemberDeltaLocked(desired []xray.Slot) error {
 		if err := s.apiAddOutbounds(files...); err != nil {
 			s.log.Printf("sync %q: ado: %v", sl.Master, err)
 			continue
+		}
+
+		// Removals last. "Already gone" is tolerated — log and keep going.
+		var rmTags []string
+		for _, k := range removeKeys {
+			rmTags = append(rmTags, xray.SlotMemberTag(ls.idx, k))
+		}
+		if err := s.apiRemoveOutbounds(rmTags...); err != nil {
+			s.log.Printf("sync %q: rmo (tolerated): %v", sl.Master, err)
 		}
 
 		// Slot converged — advance its live key set.

@@ -146,7 +146,8 @@ func NewInboundFromTemplate(name, templateName, target string) (*Inbound, error)
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := ParseTarget(target); err != nil {
+	target, err = CanonicalTarget(target)
+	if err != nil {
 		return nil, err
 	}
 	t, err := TemplateByName(templateName)

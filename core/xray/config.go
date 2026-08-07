@@ -44,10 +44,18 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 		loglevel = "warning"
 	}
 
-	// direct + block are always present so routing can reference them.
+	// block + direct are always present so routing can reference them.
+	//
+	// ORDER MATTERS AND IS A SECURITY PROPERTY: xray uses the FIRST outbound as
+	// its default handler, taken whenever routing yields no tag (an unmatched
+	// inbound, a balancer with nothing alive, a dangling tag). If that default
+	// were `direct`, every such miss would egress from this box's own IP —
+	// silently defeating the tunnel. `block` leads so a routing miss fails
+	// CLOSED. `direct` stays reachable, but only by explicit tag, i.e. only for
+	// inbounds whose Target really is "direct".
 	outbounds := []any{
-		map[string]any{"tag": "direct", "protocol": "freedom"},
 		map[string]any{"tag": "block", "protocol": "blackhole"},
+		map[string]any{"tag": "direct", "protocol": "freedom"},
 	}
 	haveOut := map[string]bool{"direct": true, "block": true}
 	for _, e := range ents {
@@ -150,10 +158,16 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 				}
 				outbounds = append(outbounds, mo)
 			}
-			// leastPing balancer over the prefix
+			// leastPing balancer over the prefix. fallbackTag pins the
+			// nothing-alive case to `block`: leastPing returns no pick until the
+			// observatory has probed at least one member (a window after every
+			// start, and after a refresh replaces the whole pool), and without an
+			// explicit fallback xray would drop to its default handler. Blocking
+			// there keeps a master's traffic from ever leaving via this box's IP.
 			balancers = append(balancers, map[string]any{
 				"tag": SlotBalTag(idx), "selector": []any{SlotOutPrefix(idx)},
-				"strategy": map[string]any{"type": "leastPing"},
+				"strategy":    map[string]any{"type": "leastPing"},
+				"fallbackTag": "block",
 			})
 			// route slot inbound → balancer
 			rules = append(rules, map[string]any{

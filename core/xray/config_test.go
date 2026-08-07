@@ -43,12 +43,15 @@ func TestGenerateEntriesAndInbounds(t *testing.T) {
 	}
 
 	outs := m["outbounds"].([]any)
-	// direct, block, out-alpha, out-beta (disabled 'off' excluded)
+	// block, direct, out-alpha, out-beta (disabled 'off' excluded)
 	if len(outs) != 4 {
 		t.Fatalf("outbounds = %d, want 4", len(outs))
 	}
-	if dig(t, outs, 0, "tag") != "direct" || dig(t, outs, 1, "tag") != "block" {
-		t.Errorf("direct/block must lead outbounds")
+	// block MUST be first: xray takes outbounds[0] as its default handler, so a
+	// routing miss has to blackhole rather than egress from this box's IP.
+	if dig(t, outs, 0, "tag") != "block" || dig(t, outs, 1, "tag") != "direct" {
+		t.Errorf("block must lead outbounds, then direct; got %v/%v",
+			dig(t, outs, 0, "tag"), dig(t, outs, 1, "tag"))
 	}
 
 	// api rule is prepended first; the user rule follows.
