@@ -18,7 +18,7 @@ func updateChecker(ctx context.Context, srv *Server, logger *log.Logger) {
 	check := func() {
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		rel, err := selfupdate.Latest(cctx)
+		rel, err := selfupdate.Latest(cctx, nil)
 		if err != nil {
 			return // offline / rate-limited — try again next tick
 		}

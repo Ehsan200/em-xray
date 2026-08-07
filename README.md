@@ -139,11 +139,45 @@ sudo emx systemd install --system --now
 ### Updating
 
 ```bash
-emx update           # check GitHub, download the matching build, swap the binary, restart the daemon
-emx update --check   # just report whether a newer release exists
+emx update              # check GitHub, download the matching build, swap the binary, restart the daemon
+emx update --check      # just report whether a newer release exists
+emx update --proxy tg   # fetch through your socks inbound named "tg" (see below)
 ```
 
 The running daemon also checks for new releases every 6h and flags it in `emx status`.
+
+The update path is the one thing emx does **not** route through its own tunnel — it talks to GitHub
+straight off the box. The release tarball is tens of megabytes, so on a slow or shaped link the
+download is bounded by *progress*, not by a stopwatch: it runs as long as bytes keep arriving, and
+gives up only after 60s of silence (`download stalled: …`).
+
+If GitHub is unreachable from the server entirely, send the update through one of your own inbounds.
+`--proxy` takes three forms:
+
+```bash
+emx update --proxy tg                          # an INBOUND NAME — port and socks credentials looked up for you
+emx update --proxy 127.0.0.1:1080              # HOST:PORT (bare means socks5)
+emx update --proxy socks5h://127.0.0.1:1080    # a full URL
+```
+
+The name form is the easy one: emx reads that inbound's port and, if it's a public socks inbound, its
+generated username/password. The inbound must be **enabled**, **socks**, and aimed at a master or an
+entry — one targeting `direct` egresses from this same box, so it can't reach what the box can't.
+
+For a proxy emx doesn't manage, authenticate explicitly:
+
+```bash
+emx update --proxy 10.0.0.1:1080 --proxy-user alice --proxy-pass 's3cret'
+```
+
+Credentials given this way are escaped for you, so `@ : / ?` in a password need no encoding. Prefer
+the environment over flags — a flag is visible to every user on the box via `ps`:
+
+```bash
+EMX_PROXY=tg EMX_PROXY_USER=alice EMX_PROXY_PASS=s3cret emx update
+```
+
+`HTTPS_PROXY` / `HTTP_PROXY` are honoured too, and `--proxy-user`/`--proxy-pass` apply to those as well.
 
 ---
 
