@@ -10,9 +10,10 @@ import (
 // GenOptions carries the OS-specific bits Generate needs (log paths), keeping
 // the rest of config generation pure and deterministic.
 type GenOptions struct {
-	AccessLog string
-	ErrorLog  string
-	LogLevel  string // default "warning"
+	AccessLog     string
+	ErrorLog      string
+	LogLevel      string // default "warning"
+	ProbeInterval string // observatory cadence, e.g. "30s"; default DefaultProbeInterval
 }
 
 // Generate builds the full xray config.json from entries (outbounds), inbounds
@@ -179,7 +180,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 		cfg["observatory"] = map[string]any{
 			"subjectSelector":   []any{ObservatorySelectorPrefix},
 			"probeURL":          DefaultProbeURL,
-			"probeInterval":     DefaultProbeInterval,
+			"probeInterval":     orDefault(opts.ProbeInterval, DefaultProbeInterval),
 			"enableConcurrency": true,
 		}
 	}

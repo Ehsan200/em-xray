@@ -75,3 +75,27 @@ func TestGenerateLogLevel(t *testing.T) {
 		t.Errorf("default loglevel = %v, want warning", lvl)
 	}
 }
+
+func TestProbeIntervalSec(t *testing.T) {
+	s := memStore(t)
+
+	if got := s.ProbeIntervalSec(); got != DefaultProbeIntervalSec {
+		t.Errorf("unset probe interval = %d, want %d", got, DefaultProbeIntervalSec)
+	}
+	if err := s.SetSetting(SettingProbeInterval, "15"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.ProbeIntervalSec(); got != 15 {
+		t.Errorf("probe interval = %d, want 15", got)
+	}
+	// Out-of-range and garbage values fall back rather than reaching xray, which
+	// would reject the config and take the whole daemon's routing with it.
+	for _, bad := range []string{"0", "-5", "99999", "soon", ""} {
+		if err := s.SetSetting(SettingProbeInterval, bad); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.ProbeIntervalSec(); got != DefaultProbeIntervalSec {
+			t.Errorf("probe interval %q = %d, want fallback %d", bad, got, DefaultProbeIntervalSec)
+		}
+	}
+}

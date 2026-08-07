@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/ehsan200/em-xray/core/xray"
@@ -47,6 +48,26 @@ func (s *Server) LogCap(ctx context.Context, req *emxv1.LogCapRequest) (*emxv1.L
 		}
 	}
 	return &emxv1.LogCapReply{Mb: int32(s.store.LogMaxMB())}, nil
+}
+
+// ProbeInterval reads (and, when req.Change, sets) the observatory probe
+// cadence in seconds. A change persists and reconciles so xray picks it up.
+// This is also the fail-closed window: after a restart a master's balancer has
+// no observation and blocks until the first probe lands.
+func (s *Server) ProbeInterval(ctx context.Context, req *emxv1.ProbeIntervalRequest) (*emxv1.ProbeIntervalReply, error) {
+	if req.Change {
+		n := int(req.SetSec)
+		if n < xray.MinProbeIntervalSec || n > xray.MaxProbeIntervalSec {
+			return nil, fmt.Errorf("probe interval must be %d-%d seconds", xray.MinProbeIntervalSec, xray.MaxProbeIntervalSec)
+		}
+		if err := s.store.SetSetting(xray.SettingProbeInterval, strconv.Itoa(n)); err != nil {
+			return nil, err
+		}
+		if err := s.sup.Reconcile(); err != nil {
+			return nil, fmt.Errorf("saved, but reconcile failed: %w", err)
+		}
+	}
+	return &emxv1.ProbeIntervalReply{Sec: int32(s.store.ProbeIntervalSec())}, nil
 }
 
 // TrafficRetention reads (and, when req.Change, sets) how many days of hourly

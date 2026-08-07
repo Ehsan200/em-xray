@@ -152,6 +152,44 @@ func loglevelCmd() *cobra.Command {
 	}
 }
 
+// probeIntervalCmd exposes the observatory cadence. It is worth surfacing
+// because it doubles as the fail-closed window: after an xray restart a master
+// has no observation, so its balancer picks nothing and blocks until the first
+// probe lands.
+func probeIntervalCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "probe-interval [seconds]",
+		Short: "show or change how often the observatory probes pool members",
+		Long: "The observatory probes every pool member on this cadence and the leastPing\n" +
+			"balancer picks from the results. It is also how long a master stays blocked\n" +
+			"after an xray restart, before any member has a result. Lower it to shorten\n" +
+			"that window; raise it to cut probe traffic.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := &emxv1.ProbeIntervalRequest{}
+			if len(args) == 1 {
+				n, err := strconv.Atoi(args[0])
+				if err != nil {
+					return fmt.Errorf("bad interval %q (want seconds)", args[0])
+				}
+				req.SetSec, req.Change = int32(n), true
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.ProbeInterval(ctx, req)
+				if err != nil {
+					return err
+				}
+				verb := "probe interval:"
+				if req.Change {
+					verb = "probe interval set to"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %ds\n", verb, reply.Sec)
+				return nil
+			})
+		},
+	}
+}
+
 // tailLastLines prints the last n lines of a file (all if it has fewer).
 func tailLastLines(path string, n int, w io.Writer) error {
 	f, err := os.Open(path)

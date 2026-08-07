@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 
@@ -95,18 +97,6 @@ func (s *Supervisor) reconcileLocked() error {
 	for i := range inbounds {
 		inbounds[i].Users = s.activeUsers(inbounds[i].ID)
 	}
-	// A direct inbound egresses from this box's own IP. That is a legitimate
-	// configuration, but never one to discover by accident — name them on every
-	// reconcile so the choice stays visible in the log.
-	for _, in := range inbounds {
-		if !in.Enabled {
-			continue
-		}
-		if kind, _, err := xray.ParseTarget(in.Target); err == nil && kind == xray.TargetDirect {
-			s.log.Printf("inbound %q targets direct — its traffic egresses from this server's own IP", in.Name)
-		}
-	}
-
 	slots, err := s.resolveDialerSlots(entries)
 	if err != nil {
 		return err
@@ -116,21 +106,53 @@ func (s *Supervisor) reconcileLocked() error {
 		AccessLog: s.paths.AccessLog(),
 		ErrorLog:  s.paths.ErrorLog(),
 		LogLevel:  s.store.LogLevel(),
+		// A restart clears every observation, so the probe cadence is also how
+		// long masters stay fail-closed afterwards.
+		ProbeInterval: strconv.Itoa(s.store.ProbeIntervalSec()) + "s",
 	})
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(s.paths.XrayConfig(), cfg); err != nil {
-		return err
+	// Generate is deterministic precisely so this comparison is possible: an
+	// RPC that reconciles without actually changing anything must not cycle
+	// xray. A restart is never free — it drops every client connection, and it
+	// resets the observatory, leaving masters fail-closed until the first probe
+	// lands.
+	unchanged := false
+	if old, err := os.ReadFile(s.paths.XrayConfig()); err == nil && bytes.Equal(old, cfg) {
+		unchanged = true
+	}
+	if !unchanged {
+		if err := writeFileAtomic(s.paths.XrayConfig(), cfg); err != nil {
+			return err
+		}
+		// A direct inbound egresses from this box's own IP. Legitimate, but
+		// never something to discover by accident — name them whenever the
+		// routing actually changes (not on every no-op reconcile).
+		for _, in := range inbounds {
+			if !in.Enabled {
+				continue
+			}
+			if kind, _, err := xray.ParseTarget(in.Target); err == nil && kind == xray.TargetDirect {
+				s.log.Printf("inbound %q targets direct — its traffic egresses from this server's own IP", in.Name)
+			}
+		}
 	}
 
 	if routable(inbounds) {
-		if s.wd.IsStarted() {
-			s.log.Print("reconcile: restarting xray with new config")
-			s.wd.Restart()
-		} else {
+		switch {
+		case !s.wd.IsStarted():
 			s.log.Print("reconcile: starting xray")
 			s.wd.Start()
+		case unchanged:
+			// xray keeps running, so it also keeps whatever the live-sync path
+			// (ado/rmo) put in its slots. loadedSlots must NOT be reset here —
+			// it still describes what is actually loaded.
+			s.log.Print("reconcile: config unchanged — leaving xray alone")
+			return nil
+		default:
+			s.log.Print("reconcile: restarting xray with new config")
+			s.wd.Restart()
 		}
 		// The freshly-written config bakes exactly these members, so they are
 		// now what xray has live. Live sync diffs against this baseline.

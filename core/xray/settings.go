@@ -14,9 +14,20 @@ type Setting struct {
 
 // Setting keys.
 const (
-	SettingLogLevel    = "loglevel"
-	SettingLogMaxMB    = "log_max_mb"
-	SettingTrafficDays = "traffic_days"
+	SettingLogLevel      = "loglevel"
+	SettingLogMaxMB      = "log_max_mb"
+	SettingTrafficDays   = "traffic_days"
+	SettingProbeInterval = "probe_interval_sec"
+)
+
+// Observatory probe cadence bounds. The interval is a latency/traffic trade
+// with a safety edge: after every xray restart a master has no observation yet,
+// so its balancer picks nothing and fails closed until the first probe lands.
+// Shorter interval = shorter blackout, more probe traffic.
+const (
+	DefaultProbeIntervalSec = 60
+	MinProbeIntervalSec     = 5
+	MaxProbeIntervalSec     = 3600
 )
 
 // DefaultLogLevel is xray's log level when none is set.
@@ -73,6 +84,17 @@ func (s *Store) LogMaxMB() int {
 		}
 	}
 	return DefaultLogMaxMB
+}
+
+// ProbeIntervalSec returns the observatory probe cadence in seconds, clamped to
+// the supported range, or the default when unset.
+func (s *Store) ProbeIntervalSec() int {
+	if v, ok := s.GetSetting(SettingProbeInterval); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= MinProbeIntervalSec && n <= MaxProbeIntervalSec {
+			return n
+		}
+	}
+	return DefaultProbeIntervalSec
 }
 
 // TrafficDays returns how many days of hourly traffic buckets to retain.

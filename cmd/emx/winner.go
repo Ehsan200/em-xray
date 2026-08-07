@@ -25,13 +25,16 @@ func winnerCmd() *cobra.Command {
 					return nil
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "MASTER\tFASTEST NODE")
+				fmt.Fprintln(tw, "MASTER\tMEMBERS\tFASTEST NODE")
 				for _, w := range reply.Winners {
 					node := w.Node
-					if node == "" {
+					switch {
+					case w.Members == 0:
+						node = "BLOCKED (pool empty)"
+					case node == "":
 						node = "(selecting…)"
 					}
-					fmt.Fprintf(tw, "%s\t%s\n", w.Master, node)
+					fmt.Fprintf(tw, "%s\t%d\t%s\n", w.Master, w.Members, node)
 				}
 				return tw.Flush()
 			})

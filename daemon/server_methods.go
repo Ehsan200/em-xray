@@ -168,7 +168,7 @@ func (s *Server) Winners(context.Context, *emxv1.Empty) (*emxv1.WinnersReply, er
 	}
 	out := make([]*emxv1.WinnerInfo, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, &emxv1.WinnerInfo{Master: w.Master, Node: w.Node, Tag: w.Tag})
+		out = append(out, &emxv1.WinnerInfo{Master: w.Master, Node: w.Node, Tag: w.Tag, Members: int32(w.Members)})
 	}
 	return &emxv1.WinnersReply{Winners: out}, nil
 }

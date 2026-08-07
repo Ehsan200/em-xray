@@ -27,6 +27,7 @@ const (
 	Daemon_XrayConfig_FullMethodName            = "/emx.v1.Daemon/XrayConfig"
 	Daemon_LogLevel_FullMethodName              = "/emx.v1.Daemon/LogLevel"
 	Daemon_LogCap_FullMethodName                = "/emx.v1.Daemon/LogCap"
+	Daemon_ProbeInterval_FullMethodName         = "/emx.v1.Daemon/ProbeInterval"
 	Daemon_TemplateList_FullMethodName          = "/emx.v1.Daemon/TemplateList"
 	Daemon_EntryAdd_FullMethodName              = "/emx.v1.Daemon/EntryAdd"
 	Daemon_EntryList_FullMethodName             = "/emx.v1.Daemon/EntryList"
@@ -78,6 +79,7 @@ type DaemonClient interface {
 	XrayConfig(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ConfigReply, error)
 	LogLevel(ctx context.Context, in *LogLevelRequest, opts ...grpc.CallOption) (*LogLevelReply, error)
 	LogCap(ctx context.Context, in *LogCapRequest, opts ...grpc.CallOption) (*LogCapReply, error)
+	ProbeInterval(ctx context.Context, in *ProbeIntervalRequest, opts ...grpc.CallOption) (*ProbeIntervalReply, error)
 	// Templates.
 	TemplateList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*TemplateListReply, error)
 	// Entries (outbounds; a non-empty dialer makes one a master).
@@ -205,6 +207,16 @@ func (c *daemonClient) LogCap(ctx context.Context, in *LogCapRequest, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LogCapReply)
 	err := c.cc.Invoke(ctx, Daemon_LogCap_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) ProbeInterval(ctx context.Context, in *ProbeIntervalRequest, opts ...grpc.CallOption) (*ProbeIntervalReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeIntervalReply)
+	err := c.cc.Invoke(ctx, Daemon_ProbeInterval_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -557,6 +569,7 @@ type DaemonServer interface {
 	XrayConfig(context.Context, *Empty) (*ConfigReply, error)
 	LogLevel(context.Context, *LogLevelRequest) (*LogLevelReply, error)
 	LogCap(context.Context, *LogCapRequest) (*LogCapReply, error)
+	ProbeInterval(context.Context, *ProbeIntervalRequest) (*ProbeIntervalReply, error)
 	// Templates.
 	TemplateList(context.Context, *Empty) (*TemplateListReply, error)
 	// Entries (outbounds; a non-empty dialer makes one a master).
@@ -633,6 +646,9 @@ func (UnimplementedDaemonServer) LogLevel(context.Context, *LogLevelRequest) (*L
 }
 func (UnimplementedDaemonServer) LogCap(context.Context, *LogCapRequest) (*LogCapReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method LogCap not implemented")
+}
+func (UnimplementedDaemonServer) ProbeInterval(context.Context, *ProbeIntervalRequest) (*ProbeIntervalReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeInterval not implemented")
 }
 func (UnimplementedDaemonServer) TemplateList(context.Context, *Empty) (*TemplateListReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method TemplateList not implemented")
@@ -894,6 +910,24 @@ func _Daemon_LogCap_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).LogCap(ctx, req.(*LogCapRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_ProbeInterval_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeIntervalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).ProbeInterval(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_ProbeInterval_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).ProbeInterval(ctx, req.(*ProbeIntervalRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1530,6 +1564,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LogCap",
 			Handler:    _Daemon_LogCap_Handler,
+		},
+		{
+			MethodName: "ProbeInterval",
+			Handler:    _Daemon_ProbeInterval_Handler,
 		},
 		{
 			MethodName: "TemplateList",

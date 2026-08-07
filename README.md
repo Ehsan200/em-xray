@@ -333,6 +333,36 @@ it can't happen by accident. Four rules keep that true:
 - **Live member sync adds before it removes.** A refresh that rotates every fingerprint is a full
   replace; removing first would empty the pool mid-flight.
 
+Because a blocked master and a broken one look identical from outside, `emx status` and `emx winner`
+report pool size and the current pick, and `emx in ls` marks the inbounds that legitimately egress
+from this box:
+
+```
+$ emx status
+pools:
+  mymaster: 0 members, BLOCKED — pool empty (refresh its subscription or check its dialer)
+
+$ emx winner
+MASTER    MEMBERS  FASTEST NODE
+mymaster  12       de-fra-03
+
+$ emx in ls
+ID  NAME  PROTO  PORT   SECURITY  TARGET                     ENABLED
+1   gate  vless  11800  reality   master:mymaster            true
+2   loc   socks  11801            direct  ⚠ this server's IP  true
+```
+
+The blackout after a restart lasts until the observatory's first probe lands, so it is bounded by the
+probe cadence:
+
+```bash
+emx probe-interval        # show (default 60s)
+emx probe-interval 15     # shorter blackout, more probe traffic (5-3600s)
+```
+
+Restarts themselves are now rare: `Generate` is deterministic and a reconcile that produces a
+byte-identical config leaves xray alone instead of cycling it.
+
 ### Testing configs
 
 `emx sub test <id>` / `emx entry test [id]` never touch the live xray. Each run writes a throwaway

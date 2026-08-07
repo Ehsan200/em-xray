@@ -10,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"bytes"
 	"github.com/ehsan200/em-xray/core/xray"
 	"github.com/ehsan200/em-xray/internal/paths"
 	"github.com/ehsan200/em-xray/internal/xraybin"
+	"os/exec"
+	"sync/atomic"
 )
 
 // TestReconcileEndToEnd proves the P4 milestone: Generate → config.json →
@@ -130,4 +133,103 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// TestReconcileSkipsRestartOnIdenticalConfig pins the payoff of Generate being
+// deterministic: reconciling twice with nothing changed must not cycle xray. A
+// restart drops every client connection and wipes the observatory, which now
+// leaves masters fail-closed until a fresh probe lands — so a gratuitous
+// restart is a small outage, not just churn.
+func TestReconcileSkipsRestartOnIdenticalConfig(t *testing.T) {
+	dir := t.TempDir()
+	p := paths.Paths{Data: dir, Config: dir, State: dir, Cache: dir, Runtime: dir}
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := xray.Open(p.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.CreateEntry(&xray.XrayEntry{
+		Name: "e", Enabled: true, Outbound: `{"protocol":"freedom","settings":{}}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateInbound(&xray.Inbound{
+		Name: "gate", Enabled: true, Protocol: "socks", Target: "xray:e",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A watchdog whose factory never produces a real process: we only care how
+	// many times a (re)start was attempted, not that xray actually ran.
+	var starts atomic.Int32
+	sup := NewSupervisor(store, p, log.New(io.Discard, "", 0))
+	sup.wd = NewWatchdog(func() (*exec.Cmd, error) {
+		starts.Add(1)
+		return exec.Command("sh", "-c", "sleep 30"), nil
+	}, log.New(io.Discard, "", 0))
+	defer sup.Stop()
+
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return starts.Load() >= 1 }, "xray to start")
+	afterFirst := starts.Load()
+
+	cfgPath := p.XrayConfig()
+	first, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	firstStat, err := os.Stat(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing changed in the store, so this reconcile must be a complete no-op.
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // give a restart, if any, time to happen
+
+	if got := starts.Load(); got != afterFirst {
+		t.Errorf("no-op reconcile restarted xray: %d starts, want %d", got, afterFirst)
+	}
+	second, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("no-op reconcile changed config.json — Generate is not deterministic")
+	}
+	if secondStat, err := os.Stat(cfgPath); err == nil {
+		if !secondStat.ModTime().Equal(firstStat.ModTime()) {
+			t.Error("no-op reconcile rewrote config.json; it should not have touched the file")
+		}
+	}
+
+	// A real change must still restart.
+	if err := store.CreateInbound(&xray.Inbound{
+		Name: "gate2", Enabled: true, Protocol: "socks", Target: "xray:e",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return starts.Load() > afterFirst }, "xray to restart after a real change")
+}
+
+// waitFor polls cond until it holds or the deadline passes.
+func waitFor(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

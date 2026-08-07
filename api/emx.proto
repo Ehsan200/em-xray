@@ -17,6 +17,7 @@ service Daemon {
   rpc XrayConfig(Empty) returns (ConfigReply);        // the generated xray config.json
   rpc LogLevel(LogLevelRequest) returns (LogLevelReply); // set (non-empty) and/or read
   rpc LogCap(LogCapRequest) returns (LogCapReply);       // per-file log size cap (MB)
+  rpc ProbeInterval(ProbeIntervalRequest) returns (ProbeIntervalReply); // observatory probe cadence
 
   // Templates.
   rpc TemplateList(Empty) returns (TemplateListReply);
@@ -116,8 +117,9 @@ message SetEnabledRequest {
 
 message WinnerInfo {
   string master = 1;
-  string node = 2; // winning member name ("" if none selected yet)
-  string tag = 3;  // slotN-out-<key>
+  string node = 2;    // winning member name ("" if none selected yet)
+  string tag = 3;     // slotN-out-<key>
+  int32 members = 4;  // resolved pool size; 0 => nothing to pick, master fails closed
 }
 message WinnersReply { repeated WinnerInfo winners = 1; }
 
@@ -261,6 +263,16 @@ message ShutdownReply {}
 // the current level. Valid: debug|info|warning|error|none.
 message LogLevelRequest { string set = 1; }
 message LogLevelReply { string level = 1; }
+
+// ProbeIntervalRequest changes how often the observatory probes pool members
+// when change=true; always returns the current value. A shorter interval
+// shortens the window after an xray restart during which a master has no live
+// member and fails closed, at the cost of more probe traffic.
+message ProbeIntervalRequest {
+  int32 set_sec = 1;
+  bool change = 2;
+}
+message ProbeIntervalReply { int32 sec = 1; }
 
 // LogCapRequest changes the per-file log cap (MB) when change=true (0 disables
 // rotation); always returns the current cap. Peak on-disk per log is ~2× cap.

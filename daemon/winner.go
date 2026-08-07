@@ -8,9 +8,10 @@ import (
 
 // Winner is the balancer-selected (fastest) member for one master.
 type Winner struct {
-	Master string
-	Node   string // human name of the winning member ("" if none yet)
-	Tag    string // slotN-out-<key> ("" if none)
+	Master  string
+	Node    string // human name of the winning member ("" if none yet)
+	Tag     string // slotN-out-<key> ("" if none)
+	Members int    // resolved pool size; 0 means the balancer has nothing to pick
 }
 
 // Winners queries the running xray for each master's current balancer winner and
@@ -49,7 +50,7 @@ func (s *Supervisor) Winners() ([]Winner, error) {
 	for _, sl := range slots {
 		i := idx[sl.Master]
 		wtag := winners[xray.SlotBalTag(i)]
-		w := Winner{Master: sl.Master, Tag: wtag}
+		w := Winner{Master: sl.Master, Tag: wtag, Members: len(sl.Members)}
 		for _, m := range sl.Members {
 			if xray.SlotMemberTag(i, m.Key) == wtag {
 				w.Node = s.memberName(m.Key)

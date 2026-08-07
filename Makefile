@@ -13,7 +13,7 @@ TARGET     ?= linux-64
 
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: all fetch-xray proto build run test vet fmt clean tools release
+.PHONY: all fetch-xray proto build build-linux run test vet fmt clean tools release
 
 all: build
 
@@ -31,6 +31,24 @@ proto:
 ## build: build the emx binary for the host
 build:
 	go build -ldflags '$(LDFLAGS)' -o $(BIN) $(PKG)
+
+## build-linux: cross-build a deployable binary for a Linux server
+##   make build-linux            (x86_64 / amd64)
+##   make build-linux ARCH=arm64 (aarch64)
+##
+## Re-fetches the embedded xray for the TARGET first — that step is not
+## optional. go:embed bakes in whatever is sitting in internal/xraybin/assets,
+## so cross-building without it ships the HOST's xray inside a Linux binary and
+## the daemon fails to start its child. Fetching also overwrites your local
+## assets: run `make fetch-xray TARGET=macos-arm64` to build for this Mac again.
+ARCH ?= amd64
+build-linux:
+	XRAY_VERSION=$(XRAY_VERSION) \
+	TARGET=$(if $(filter arm64,$(ARCH)),linux-arm64-v8a,linux-64) \
+	./scripts/fetch-xray.sh
+	mkdir -p dist
+	GOOS=linux GOARCH=$(ARCH) go build -ldflags '$(LDFLAGS)' -o dist/emx-linux-$(ARCH) $(PKG)
+	@echo ">> dist/emx-linux-$(ARCH) ready — scp it to the server"
 
 ## run: build + start the daemon in the foreground
 run: build

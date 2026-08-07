@@ -52,6 +52,7 @@ func rootCmd() *cobra.Command {
 		configCmd(),
 		xrayCmd(),
 		loglevelCmd(),
+		probeIntervalCmd(),
 		updateCmd(),
 		systemdCmd(),
 		uiCmd(),

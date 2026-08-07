@@ -193,6 +193,24 @@ func statusCmd() *cobra.Command {
 			if st.UpdateAvailable {
 				fmt.Fprintf(out, "update:  %s available (run `emx update`)\n", st.LatestVersion)
 			}
+			// Pool health. A master whose pool is empty now fails CLOSED rather
+			// than leaking this box's IP, so "nothing works" and "pool is empty"
+			// look identical from the outside — say which it is.
+			if x != nil && x.Running {
+				if w, err := c.Winners(ctx, &emxv1.Empty{}); err == nil && len(w.Winners) > 0 {
+					fmt.Fprintln(out, "pools:")
+					for _, m := range w.Winners {
+						switch {
+						case m.Members == 0:
+							fmt.Fprintf(out, "  %s: BLOCKED — pool empty (refresh its subscription or check its dialer)\n", m.Master)
+						case m.Node == "":
+							fmt.Fprintf(out, "  %s: %d members, selecting… (no probe result yet — traffic blocked until one lands)\n", m.Master, m.Members)
+						default:
+							fmt.Fprintf(out, "  %s: %d members, via %s\n", m.Master, m.Members, m.Node)
+						}
+					}
+				}
+			}
 			return nil
 		},
 	}

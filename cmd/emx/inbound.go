@@ -159,10 +159,23 @@ func inboundListCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "ID\tNAME\tPROTO\tPORT\tSECURITY\tTARGET\tENABLED")
+			direct := 0
 			for _, in := range reply.Inbounds {
-				fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\t%s\t%v\n", in.Id, in.Name, in.Protocol, in.Port, in.Security, in.Target, in.Enabled)
+				// A direct target is the one egress that reveals this server's own
+				// IP. Mark it in the listing so it is never a silent surprise.
+				target := in.Target
+				if isDirectTarget(target) {
+					target += "  ⚠ this server's IP"
+					if in.Enabled {
+						direct++
+					}
+				}
+				fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\t%s\t%v\n", in.Id, in.Name, in.Protocol, in.Port, in.Security, target, in.Enabled)
 			}
 			tw.Flush()
+			if direct > 0 {
+				fmt.Fprintf(out, "\n⚠ %d enabled inbound(s) egress from this server's own IP (target: direct).\n", direct)
+			}
 			if links {
 				fmt.Fprintln(out)
 				for _, in := range reply.Inbounds {
@@ -176,6 +189,13 @@ func inboundListCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&links, "links", false, "also print client share links")
 	return c
+}
+
+// isDirectTarget reports whether an inbound's target egresses straight off this
+// box. Blank is the legacy spelling of "direct" and means the same thing.
+func isDirectTarget(target string) bool {
+	t := strings.TrimSpace(target)
+	return t == "" || t == "direct"
 }
 
 func inboundRemoveCmd() *cobra.Command {

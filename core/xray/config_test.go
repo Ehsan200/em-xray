@@ -165,3 +165,36 @@ func TestAssignInboundPorts(t *testing.T) {
 		t.Error("disabled inbound must not get a port")
 	}
 }
+
+// TestGenerateProbeInterval checks the observatory cadence is configurable and
+// falls back to the default. The interval doubles as the fail-closed window
+// after a restart, so it has to be reachable from settings.
+func TestGenerateProbeInterval(t *testing.T) {
+	entries := []XrayEntry{{Name: "m", Enabled: true, Dialer: "xray:n", Outbound: `{"protocol":"freedom"}`}}
+	inbounds := []Inbound{{Name: "g", Enabled: true, Protocol: "socks", Port: 12001, Target: "master:m"}}
+	slots := []Slot{{Master: "m", Members: []SlotMember{{Key: "n", Outbound: `{"protocol":"freedom"}`}}}}
+
+	read := func(t *testing.T, opts GenOptions) string {
+		t.Helper()
+		b, err := Generate(entries, inbounds, slots, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		obs, ok := m["observatory"].(map[string]any)
+		if !ok {
+			t.Fatal("no observatory in config")
+		}
+		return obs["probeInterval"].(string)
+	}
+
+	if got := read(t, GenOptions{}); got != DefaultProbeInterval {
+		t.Errorf("default probeInterval = %q, want %q", got, DefaultProbeInterval)
+	}
+	if got := read(t, GenOptions{ProbeInterval: "10s"}); got != "10s" {
+		t.Errorf("probeInterval = %q, want 10s", got)
+	}
+}
