@@ -27,6 +27,16 @@ func rootCmd() *cobra.Command {
 		Short:         "master xray dialer + subscriptions",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// One machine, one database: a non-root run defers to the root instance
+		// instead of opening a second scope that looks empty. Checked here so
+		// every command reports it the same way, including the ones that treat
+		// an unreachable daemon as "stopped".
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if scopeExempt(cmd) {
+				return nil
+			}
+			return ensureSharedScope()
+		},
 		// Bare `emx` on a terminal opens the interactive menu.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {

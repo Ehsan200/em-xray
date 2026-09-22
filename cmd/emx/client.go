@@ -17,6 +17,9 @@ func xrayEmbeddedVersion() string { return xraybin.Version() }
 
 // dial connects to the running daemon over its unix socket.
 func dial(ctx context.Context) (emxv1.DaemonClient, *grpc.ClientConn, error) {
+	if err := ensureSharedScope(); err != nil {
+		return nil, nil, err
+	}
 	sock := paths.Default().Socket()
 	conn, err := grpc.NewClient(
 		"unix:"+sock,

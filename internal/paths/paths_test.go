@@ -1,6 +1,9 @@
 package paths
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestRuntimeDirRootIsStableAcrossEnvironments(t *testing.T) {
 	want := "/tmp/emx-0"
@@ -32,5 +35,42 @@ func TestBaseDirNormalUserFollowsXDG(t *testing.T) {
 	}
 	if got := baseDirFor(1000, "", "/home/alice", ".local/share"); got != "/home/alice/.local/share/emx" {
 		t.Fatalf("user fallback data dir = %q", got)
+	}
+}
+
+func TestLegacyDataDirsCoverPreviousRootLayouts(t *testing.T) {
+	got := legacyDataDirs(0, "/home/alice/.local/share", "/home/alice", "/home/alice", "/root/.local/share/emx")
+	want := []string{"/home/alice/.local/share/emx", "/home/alice/.local/share/emx"}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("root legacy data dirs = %v", got)
+	}
+}
+
+func TestLegacyDataDirsExcludeCurrent(t *testing.T) {
+	got := legacyDataDirs(1000, "", "/home/alice", "", "/home/alice/.local/share/emx")
+	if len(got) != 0 {
+		t.Fatalf("current dir must not be offered as legacy: %v", got)
+	}
+}
+
+func TestLegacyRuntimeDirsIncludeOldRootSocketDir(t *testing.T) {
+	got := legacyRuntimeDirs(0, "/run/user/0", "/tmp", "/tmp/emx-0")
+	want := []string{"/run/user/0/emx", "/run/user/0/emx"}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("root legacy runtime dirs = %v", got)
+	}
+}
+
+func TestRootTempIgnoresTMPDIR(t *testing.T) {
+	got := rootStableTemp(0, "/var/folders/private-tmp")
+	want := "/tmp"
+	if runtime.GOOS != "linux" {
+		want = "/var/folders/private-tmp"
+	}
+	if got != want {
+		t.Fatalf("root temp = %q, want %q", got, want)
+	}
+	if got := rootStableTemp(1000, "/var/folders/private-tmp"); got != "/var/folders/private-tmp" {
+		t.Fatalf("user temp = %q", got)
 	}
 }

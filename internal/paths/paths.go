@@ -102,7 +102,17 @@ func baseDirFor(uid int, xdg, home, fallback string) string {
 // `sudo emx` may receive /run/user/0, which used to make the CLI and daemon use
 // different sockets despite sharing the same database.
 func runtimeDir() string {
-	return runtimeDirFor(os.Getuid(), os.Getenv("XDG_RUNTIME_DIR"), os.TempDir())
+	return runtimeDirFor(os.Getuid(), os.Getenv("XDG_RUNTIME_DIR"), rootStableTemp(os.Getuid(), os.TempDir()))
+}
+
+// rootStableTemp keeps root off $TMPDIR: a system service has none while an
+// interactive `sudo emx` may inherit one, which would again split the CLI and
+// the daemon across two sockets.
+func rootStableTemp(uid int, temp string) string {
+	if uid == 0 && runtime.GOOS == "linux" {
+		return "/tmp"
+	}
+	return temp
 }
 
 func runtimeDirFor(uid int, xdg, temp string) string {

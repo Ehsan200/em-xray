@@ -51,6 +51,11 @@ func Run(ctx context.Context) error {
 	if pid, ok := RunningPID(p); ok {
 		return fmt.Errorf("daemon already running (pid %d)", pid)
 	}
+	// A daemon started by an older build lives in a different runtime dir and
+	// would not be seen by the check above, yet it still owns the xray child.
+	if dir, pid, ok := LegacyDaemon(p); ok {
+		return fmt.Errorf("an emx daemon from a previous layout is running (pid %d, %s); stop it first so only one daemon owns %s", pid, dir, p.DB())
+	}
 	// Unix socket paths are capped by the kernel (sun_path: 104 on darwin,
 	// 108 on linux). A real $XDG_RUNTIME_DIR (/run/user/<uid>) is short; guard
 	// so an over-long override fails with a clear message, not bind EINVAL.
@@ -76,6 +81,12 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("listen %s: %w", p.Socket(), err)
 	}
 	defer os.Remove(p.Socket())
+
+	// An upgrade can move where the database is looked up; bring the previous
+	// one forward so an existing configuration survives the change.
+	if err := AdoptLegacyDB(p, logger); err != nil {
+		return err
+	}
 
 	// Persistence + supervisor + subscription scheduler.
 	store, err := xray.Open(p.DB())

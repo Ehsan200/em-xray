@@ -14,8 +14,6 @@ import (
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/ehsan200/em-xray/core/xray"
-	"github.com/ehsan200/em-xray/daemon"
-	"github.com/ehsan200/em-xray/internal/paths"
 	"github.com/ehsan200/em-xray/internal/selfupdate"
 	"github.com/spf13/cobra"
 )
@@ -43,6 +41,9 @@ func updateCmd() *cobra.Command {
 		Use:   "update",
 		Short: "check for a newer release and self-update the binary",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := ensureSharedScope(); err != nil {
+				return err
+			}
 			out := cmd.OutOrStdout()
 			proxy = firstNonEmpty(proxy, os.Getenv(envProxy))
 			proxyUser = firstNonEmpty(proxyUser, os.Getenv(envUser))
@@ -108,7 +109,7 @@ func updateCmd() *cobra.Command {
 			fmt.Fprintf(out, "\nupdated to %s\n", rel.Tag)
 
 			// Restart the running daemon so it executes the new binary.
-			_, alive := daemon.RunningPID(paths.Default())
+			alive := daemonPresent()
 			if alive && !noRestart {
 				fmt.Fprintln(out, "restarting daemon…")
 				if err := restartDaemon(cmd); err != nil {
@@ -139,7 +140,7 @@ func daemonVersionDiffers(cmd *cobra.Command, want string) bool {
 	if want == "" || want == "dev" {
 		return false
 	}
-	if _, alive := daemon.RunningPID(paths.Default()); !alive {
+	if !daemonPresent() {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)

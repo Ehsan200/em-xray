@@ -21,6 +21,9 @@ func startCmd() *cobra.Command {
 		Use:   "start",
 		Short: "start the daemon in the background (auto-restarts xray on crash)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := ensureSharedScope(); err != nil {
+				return err
+			}
 			if foreground {
 				return daemon.Run(cmd.Context())
 			}
@@ -78,6 +81,9 @@ func daemonRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if args[0] != "run" {
 				return fmt.Errorf("unknown daemon subcommand %q", args[0])
+			}
+			if err := ensureSharedScope(); err != nil {
+				return err
 			}
 			return daemon.Run(cmd.Context())
 		},
@@ -151,21 +157,20 @@ func restartXray(cmd *cobra.Command) error {
 // fresh even if it wasn't running. Used by `emx restart` and by `emx update`
 // after swapping the binary so the new code takes effect.
 func restartDaemon(cmd *cobra.Command) error {
+	// An upgrade can move the runtime directory, so a daemon started by the
+	// previous build is invisible to the pid file but still owns an xray child.
+	stopLegacyDaemon(cmd)
 	// Keep a systemd-managed daemon under systemd. A graceful RPC shutdown is
 	// considered successful, so Restart=on-failure would otherwise leave the
 	// unit inactive while emx spawned an unmanaged replacement.
-	if runtime.GOOS == "linux" {
-		if _, err := exec.LookPath("systemctl"); err == nil {
-			system := os.Geteuid() == 0
-			if systemctl(system, "is-active", "--quiet", systemdUnitName).Run() == nil {
-				restart := systemctl(system, "restart", systemdUnitName)
-				restart.Stdout, restart.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
-				if err := restart.Run(); err != nil {
-					return fmt.Errorf("restart %s: %w", systemdUnitName, err)
-				}
-				return waitReady(5 * time.Second)
-			}
+	if systemdDaemonActive() {
+		system := os.Geteuid() == 0
+		restart := systemctl(system, "restart", systemdUnitName)
+		restart.Stdout, restart.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
+		if err := restart.Run(); err != nil {
+			return fmt.Errorf("restart %s: %w", systemdUnitName, err)
 		}
+		return waitReady(5 * time.Second)
 	}
 	p := paths.Default()
 	if _, alive := daemon.RunningPID(p); alive {
@@ -176,6 +181,44 @@ func restartDaemon(cmd *cobra.Command) error {
 		_ = waitGone(p, 5*time.Second)
 	}
 	return startDetached(cmd)
+}
+
+// systemdDaemonActive reports whether this scope's emx unit is running, which
+// makes systemd — not emx — responsible for respawning the daemon.
+func systemdDaemonActive() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+	return systemctl(os.Geteuid() == 0, "is-active", "--quiet", systemdUnitName).Run() == nil
+}
+
+// stopLegacyDaemon terminates a daemon left behind by a previous runtime
+// layout. Two daemons would fight over the xray api port and config file.
+func stopLegacyDaemon(cmd *cobra.Command) {
+	dir, pid, ok := daemon.LegacyDaemon(paths.Default())
+	if !ok {
+		return
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "stopping daemon from the previous layout (pid %d, %s)\n", pid, dir)
+	if proc, err := os.FindProcess(pid); err == nil {
+		_ = proc.Signal(syscall.SIGTERM)
+	}
+}
+
+// daemonPresent reports whether any emx daemon is running for this scope: the
+// current layout, a previous one, or a systemd unit whose pid file this build
+// does not look at.
+func daemonPresent() bool {
+	if _, alive := daemon.RunningPID(paths.Default()); alive {
+		return true
+	}
+	if _, _, ok := daemon.LegacyDaemon(paths.Default()); ok {
+		return true
+	}
+	return systemdDaemonActive()
 }
 
 func statusCmd() *cobra.Command {

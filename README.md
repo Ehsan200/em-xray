@@ -1,137 +1,66 @@
 # em-xray
 
-A single-binary Linux daemon + CLI that turns [xray-core](https://github.com/XTLS/Xray-core)
-into a **master dialer with subscription-backed node pools**: subscription URLs become a live pool
-of nodes, and a "master" outbound tunnels its own server connection through **whichever node in the
-pool is currently fastest** — with **zero xray restarts** on node churn.
+Single-binary Linux daemon + CLI wrapping [xray-core](https://github.com/XTLS/Xray-core).
 
-It also runs as a **server**: expose a `vless` / `vmess` / `trojan` / `hysteria2` / `socks` listener (keys +
-self-signed TLS certs auto-generated, client share-link + QR printed) whose traffic egresses through a
-master's fastest node — with **per-user accounts, byte quotas, and live traffic charts**.
+Two jobs:
+
+1. **Master dialer** — a subscription URL becomes a live pool of nodes; a "master" outbound tunnels
+   through whichever node is currently fastest, with **no xray restart** when the pool changes.
+2. **Server** — expose `vless` / `vmess` / `trojan` / `hysteria2` / `socks` listeners (keys, TLS certs,
+   share link + QR auto-generated), egressing through a master, with per-user accounts and quotas.
 
 ```
 your client ──vless/reality──▶ emx inbound ──▶ master ──dialerProxy──▶ fastest node ──▶ internet
                                                          (leastPing balancer + observatory)
 ```
 
----
-
-## Highlights
-
-- **Fastest-node routing** — subscription nodes are probed by xray's observatory; a `leastPing`
-  balancer picks the winner. Nodes never listen on ports; they're outbounds ranked by live latency.
-- **Zero-restart churn** — a subscription refresh, node enable/disable, or cap change updates the
-  live pool over xray's gRPC API (`ado`/`rmo`), never restarting xray or dropping connections.
-- **Server mode** — create an inbound from built-in templates (vless/vmess/trojan × reality/TLS ×
-  tcp/ws/grpc/xhttp/httpupgrade, plus hysteria2/QUIC) with one command; UUID, REALITY keypair, and **self-signed TLS
-  certs** (via `xray tls cert`, no domain needed) are auto-generated and the client share-link + a
-  scannable **QR code** are printed.
-- **Multi-user + quotas** — add many client accounts to one listener, each with its own UUID/link and
-  an optional **byte cap**; a user that hits their quota is dropped from the config automatically.
-- **Traffic charts** — per-inbound/outbound byte totals (24h / all-time) as terminal sparklines, a
-  **live ↑/↓ speed meter**, and per-user usage. xray's stats API is sampled into hourly buckets.
-- **Per-config latency test** — `emx sub test` / `emx entry test` measure the *real* round trip
-  through each config: a throwaway xray is started with one loopback socks inbound per config and the
-  probe URL is fetched through each, concurrently. Node results are persisted and shown in the lists.
-- **Restart levers** — `emx restart --xray` (or `emx xray restart`) force-cycles just the xray child
-  when it wedges; `emx restart` bounces the whole daemon. Both are in the TUI under *Restart*.
-- **Stall recovery** — the daemon checks xray's local API every 30 seconds. Three consecutive
-  failures trigger a clean xray restart; `emx status` shows whether xray is responsive and how many
-  health restarts have occurred.
-- **Managed Caddy/XHTTP** — install and control Caddy from emx, attach multiple domains to
-  socket-backed VLESS/XHTTP inbounds, validate the generated Caddyfile, and reload without hand
-  writing proxy routes.
-- **Backup / restore** — export the whole config (inbounds + entries + subscriptions) to one JSON
-  file and import it back, merge or replace.
-- **Self-managed daemon** — `emx start` detaches into the background, supervises the xray child, and
-  restarts it on crash with exponential backoff. No systemd, no root required.
-- **Interactive TUI** — run any command bare (`emx`, `emx sub`, `emx in`…) for arrow-key menus.
-  Everything is selectable; you never type an ID or a node fingerprint.
-- **Single binary** — the matching xray-core binary + geo data are embedded via `go:embed`.
+The xray binary and geo data are embedded. Interactive menus: run any command group bare (`emx`,
+`emx in`, `emx sub`, `emx entry`).
 
 ---
 
 ## Install
 
-### Install the latest release globally on a Linux server
-
-Prebuilt amd64 and arm64 releases contain both `emx` and the matching embedded xray. The following
-commands detect the server architecture, download the latest release, and install `emx` in
-`/usr/local/bin` so it is available to every shell and to systemd:
+Prebuilt linux/macOS × amd64/arm64 archives are attached to each release.
 
 ```bash
 case "$(uname -m)" in
   x86_64|amd64) ARCH=amd64 ;;
   aarch64|arm64) ARCH=arm64 ;;
-  *) echo "unsupported architecture: $(uname -m)"; exit 1 ;;
+  *) echo "unsupported: $(uname -m)"; exit 1 ;;
 esac
-
-LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-  https://github.com/Ehsan200/em-xray/releases/latest)"
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/Ehsan200/em-xray/releases/latest)"
 VERSION="${LATEST_URL##*/}"
-EMX_INSTALL_DIR="$(mktemp -d)"
-curl -fL \
-  "https://github.com/Ehsan200/em-xray/releases/download/${VERSION}/emx-${VERSION}-linux-${ARCH}.tar.gz" \
-  -o "${EMX_INSTALL_DIR}/emx.tar.gz"
-tar -xzf "${EMX_INSTALL_DIR}/emx.tar.gz" -C "${EMX_INSTALL_DIR}"
-sudo install -m 0755 "${EMX_INSTALL_DIR}/emx-linux-${ARCH}/emx" /usr/local/bin/emx
-rm -rf "${EMX_INSTALL_DIR}"
-
-command -v emx       # /usr/local/bin/emx
+DIR="$(mktemp -d)"
+curl -fL "https://github.com/Ehsan200/em-xray/releases/download/${VERSION}/emx-${VERSION}-linux-${ARCH}.tar.gz" -o "$DIR/emx.tar.gz"
+tar -xzf "$DIR/emx.tar.gz" -C "$DIR"
+sudo install -m 0755 "$DIR/emx-linux-${ARCH}/emx" /usr/local/bin/emx
+rm -rf "$DIR"
 emx version
 ```
 
-For a new Caddy/XHTTP server, use one root-owned system service and always use `sudo emx ...`. This
-keeps the CLI, daemon, database, Xray sockets, and Caddy configuration in the same scope:
+Then run it as a root system service (required if emx manages Caddy):
 
 ```bash
 sudo emx systemd install --system --now
 sudo emx status
-sudo emx                         # open the interactive menu
+sudo emx                      # interactive menu
 ```
 
-If emx is already installed and you replace `/usr/local/bin/emx` manually, restart the existing
-daemon so the process loads the new binary and templates:
+**One machine, one database.** Root uses `/root/.local/share/emx/emx.db` and `/tmp/emx-0`, ignoring
+any `HOME` / XDG / `TMPDIR` that sudo passes through, so `sudo emx` and the system service are always
+the same instance. Once root state exists, a plain `emx` refuses to open a second, private scope:
 
-```bash
-sudo systemctl restart emx.service
-sudo emx status
-sudo emx template ls             # includes vless-caddy-xhttp
+```
+this machine's emx state belongs to root (/tmp/emx-0); run `sudo emx ...` so both use the same
+database, or set EMX_USER_SCOPE=1 to keep a separate per-user daemon
 ```
 
-Do not alternate between `emx` and `sudo emx`: they intentionally use different databases. A normal
-user reads `~/.local/share/emx/emx.db`; every root invocation and the system service use
-`/root/.local/share/emx/emx.db`, regardless of inherited `HOME` or XDG variables. To
-move an existing user configuration to the system service, export it before changing scope:
+Build from source instead (needs Go and the xray assets):
 
 ```bash
-emx config export --out /tmp/emx-backup.json
-emx stop
-sudo emx systemd install --system --now
-sudo emx config import /tmp/emx-backup.json
-rm /tmp/emx-backup.json           # contains credentials; remove it after checking the import
-```
-
-For a downloaded or locally built binary that is already on disk, only the install step is needed:
-
-```bash
-sudo install -m 0755 ./emx /usr/local/bin/emx
-```
-
-### Build from source
-
-Requires Go 1.26+. The xray binary is fetched at build time (it is not committed).
-
-```bash
-git clone <this-repo> em-xray && cd em-xray
-make fetch-xray            # downloads xray v26.3.27 for linux-64 (override with TARGET=)
-make build                 # produces ./emx
-```
-
-Cross-target builds fetch the matching xray triple, e.g. for local macOS testing:
-
-```bash
-make fetch-xray TARGET=macos-arm64-v8a
+make fetch-xray TARGET=linux-amd64     # linux-amd64 | linux-arm64 | darwin-amd64 | darwin-arm64
+make build                             # ./emx
 ```
 
 ---
@@ -139,235 +68,101 @@ make fetch-xray TARGET=macos-arm64-v8a
 ## Quick start
 
 ```bash
-emx start                                  # launch the background daemon
+sudo emx start                                  # only if you skipped the systemd unit
 
-# 1. add a subscription (node pool)
-emx sub add mysub "https://provider/link"
-
-# 2. add a master: your own server (from a share link) that dials through the pool's fastest node
-emx entry add mymaster \
+sudo emx sub add mysub "https://provider/link"  # 1. node pool
+sudo emx entry add mymaster \
     --link "vless://…your-server…" \
-    --dialer "xraysub:mysub"
+    --dialer "xraysub:mysub"                    # 2. master dialing through the pool
+sudo emx in add gate --to master:mymaster       # 3. listener for your devices → prints vless://…
 
-# 3. expose a server for your devices, egressing through the master
-emx in add gate --to master:mymaster       # prints a client vless://… link
-emx in qr 1                                # same link as a scannable QR code
-
-# see which node is currently fastest, and how much traffic has flowed
-emx winner
-emx traffic                                # per-inbound/outbound charts (24h + all-time)
-emx speed                                  # live ↑/↓ throughput, Ctrl-C to stop
+sudo emx in qr 1                                # link as a QR code
+sudo emx winner                                 # current fastest node per master
+sudo emx traffic                                # per-inbound/outbound charts
+sudo emx speed                                  # live ↑/↓ throughput
 ```
 
-Add extra client accounts to a listener, each with its own link and an optional quota:
+Extra client accounts on one listener, each with its own link and optional quota:
 
 ```bash
-emx in user add 1 alice --cap 50GB         # own uuid/link; access denied once 50 GB is used
-emx in user ls 1                           # usage vs cap per user
+sudo emx in user add 1 alice --cap 50GB
+sudo emx in user ls 1
 ```
 
-Prefer menus? Just run `emx` (or `emx sub`, `emx in`, `emx entry`) with no arguments.
+---
 
-### Caddy + Cloudflare + XHTTP
+## Caddy + Cloudflare + XHTTP
 
-Use the `vless-caddy-xhttp` template when Caddy owns Cloudflare's supported HTTP and HTTPS ports and
-forwards VLESS/XHTTP to xray over a Unix socket. Xray itself does not terminate TLS in this setup;
-Caddy obtains the certificate and the generated client link uses the public domain on port 443.
+`vless-caddy-xhttp` puts Caddy in front: Caddy owns Cloudflare's proxied ports and terminates TLS,
+then forwards VLESS/XHTTP to xray over a Unix socket. The client link uses the domain on port 443.
 
-The generated Caddyfile listens on HTTP ports `80`, `8080`, `8880`, `2052`, `2082`, `2086`, `2095`
-and HTTPS ports `443`, `2053`, `2083`, `2087`, `2096`, `8443`, matching Cloudflare's
-[proxied-port list](https://developers.cloudflare.com/fundamentals/reference/network-ports/).
+Generated site addresses: HTTP `80, 8080, 8880, 2052, 2082, 2086, 2095`, HTTPS
+`443, 2053, 2083, 2087, 2096, 8443`
+([Cloudflare's list](https://developers.cloudflare.com/fundamentals/reference/network-ports/)).
 
-Before starting:
-
-- create the domain's DNS record and point it to this server;
-- if Cloudflare proxies the record, use an SSL/TLS mode that validates the origin certificate;
-- allow the listed TCP ports through the server firewall (at minimum 80 and 443 are needed for the
-  default link and normal certificate provisioning);
-- run the system-wide emx daemon shown above.
-
-Install Caddy from its official Debian/Ubuntu repository:
+Before starting: point the domain's DNS record at this server, use an SSL/TLS mode that validates the
+origin if Cloudflare proxies it, open those TCP ports (80 and 443 at minimum), and run the root
+system service.
 
 ```bash
-sudo emx caddy install
-sudo emx caddy status
+sudo emx caddy install                      # official Debian/Ubuntu package
+sudo emx in add edge -t vless-caddy-xhttp --domain x.example.com --to direct
 ```
 
-Create an inbound. UUID, email, path, Unix socket, and client link are generated automatically.
-`packet-up` is the template default:
+UUID, email, path, socket and client link are generated; `--to master:NAME` routes through a master
+instead of this server's IP. Multiple domains are just multiple inbounds. Override explicitly with
+`--path /p/ --email you@example.com --xhttp-mode packet-up`.
+
+emx validates and applies the Caddyfile itself when it runs as root. Manually:
 
 ```bash
-sudo emx in add edge \
-  --template vless-caddy-xhttp \
-  --domain x.example.com \
-  --to direct
+sudo emx caddy print       # preview the generated Caddyfile
+sudo emx caddy domains     # domain, path, inbound
+sudo emx caddy apply       # validate, back up, write, reload
+sudo emx caddy status | enable | disable
 ```
 
-The same flow is available in the interactive menu: run `sudo emx`, choose **Inbounds → Add**, then
-select **vless-caddy-xhttp**. Installation, generated domains, apply, enable, disable, and status are
-under the top-level **Caddy** menu. If that template is missing, the running daemon is older than the
-installed CLI; run `sudo systemctl restart emx.service` and open the menu again.
+`emx caddy apply` **owns** `/etc/caddy/Caddyfile`: it backs the old file up, replaces it, and disables
+the Caddy service once no managed inbound remains. Don't point it at a Caddy serving other sites.
 
-Because this is a Caddy-managed inbound, emx validates and applies the Caddyfile automatically when
-it has root access. Applying explicitly is safe and useful after manual edits:
+Edit an inbound later with `sudo emx in edit <id>` (or *Inbounds → Edit JSON*). Changing UUID, path
+or domain means re-importing the client link; changing the email changes the stats key.
+
+---
+
+## Updating
 
 ```bash
-sudo emx caddy print       # preview
-sudo emx caddy domains     # domain, path, inbound name
-sudo emx caddy apply       # validate, back up, write, and reload
+sudo emx update              # download, replace the binary, restart the daemon
+sudo emx update --check      # report only
+sudo emx update --proxy tg   # fetch through your own socks inbound named "tg"
 ```
 
-Route the same kind of inbound through a master instead of the server's direct IP:
+**Your configuration survives an upgrade.** Older builds could keep the database under an inherited
+`HOME` / `XDG_DATA_HOME` and their socket under `/run/user/0/emx`. On first start the daemon **copies**
+a database found in one of those layouts into the current location (the original is never deleted),
+and `emx update` / `emx restart` stop a daemon still running under the old layout. Verify with:
 
 ```bash
-sudo emx in add edge-tunnel \
-  -t vless-caddy-xhttp \
-  --domain tunnel.example.com \
-  --to master:mymaster
+sudo emx xray paths          # database / socket / config in use
+sudo emx in ls               # should be exactly what you had
 ```
 
-Multiple domains are just multiple inbounds. Each gets an independent credential, path, and socket:
+If it adopted the wrong one, the old file is still there — import it with `sudo emx config import`.
+
+The daemon also checks for releases every 6h and flags it in `emx status`.
+
+Updates are the one thing emx does **not** route through its own tunnel. The download is bounded by
+progress, not a stopwatch: it gives up after 60s of silence. If GitHub is unreachable from the box,
+`--proxy` takes an inbound name (port + credentials looked up for you; must be enabled, socks, and
+aimed at a master or entry), a `HOST:PORT`, or a full `socks5h://` / `http://` URL. Prefer the
+environment over flags — a flag is visible in `ps`:
 
 ```bash
-sudo emx in add alpha -t vless-caddy-xhttp --domain a.example.com --to master:mymaster
-sudo emx in add beta  -t vless-caddy-xhttp --domain b.example.com --to master:mymaster
-sudo emx caddy domains
+EMX_PROXY=tg EMX_PROXY_USER=alice EMX_PROXY_PASS=s3cret sudo -E emx update
 ```
 
-Values can also be supplied explicitly:
-
-```bash
-sudo emx in add custom \
-  -t vless-caddy-xhttp \
-  --domain x.example.com \
-  --path /generated-path/ \
-  --email ehsan@xhttp.com \
-  --xhttp-mode packet-up \
-  --to direct
-```
-
-The corresponding part of `sudo emx xray config` has the same shape as a hand-written Xray
-inbound—there is no Iran-specific or other regional routing added:
-
-```json
-{
-  "listen": "/dev/shm/emx-xhttp-custom.sock,0666",
-  "protocol": "vless",
-  "settings": {
-    "clients": [
-      {
-        "id": "generated-or-supplied-uuid",
-        "email": "ehsan@xhttp.com",
-        "level": 0
-      }
-    ],
-    "decryption": "none"
-  },
-  "streamSettings": {
-    "network": "xhttp",
-    "xhttpSettings": {
-      "path": "/generated-path/",
-      "mode": "packet-up"
-    }
-  }
-}
-```
-
-Edit them later with `sudo emx in edit <id>` or choose **Inbounds → Edit JSON** in the menu. The
-important fields are `UUID`, `ClientEmail`, `Path`, `XHTTPMode`, and `PublicHost`. Saving regenerates
-the Xray config and reapplies Caddy. Changing UUID, path, or domain requires importing the new client
-link; changing `ClientEmail` changes the key used for future traffic statistics.
-
-```bash
-sudo emx in ls --links
-sudo emx in qr 1
-```
-
-Caddy service controls are also available in the main interactive menu:
-
-```bash
-sudo emx caddy enable
-sudo emx caddy disable
-sudo emx caddy status
-```
-
-### Keep it running (systemd)
-
-`emx start` supervises the xray child itself, but to survive a **reboot or a daemon crash**, install a
-systemd service:
-
-```bash
-emx systemd install --now        # user service (default); starts + enables it
-loginctl enable-linger "$USER"   # keep it running across reboots without a login session
-
-# system-wide (needs root) instead:
-sudo emx systemd install --system --now
-```
-
-`emx systemd print` shows the unit without installing; `emx systemd uninstall` removes it.
-
-### Updating
-
-```bash
-# System-wide/root installation (recommended for Caddy):
-sudo emx update              # download, replace /usr/local/bin/emx, restart emx.service
-sudo emx update --check      # only report whether a newer release exists
-
-# Per-user installation (do not use sudo for this scope):
-emx update                   # update and restart that user's daemon/service
-
-sudo emx update --proxy tg   # fetch through the root daemon's socks inbound named "tg"
-```
-
-Run the update with the same user that owns the daemon and configurations. Updating as another user
-does not delete anything, but it selects that user's separate database and can make the original
-configuration appear to have vanished. `emx update` also detects an already-current binary with an
-older running daemon and restarts it.
-
-Older builds could let `sudo emx` look for `/run/user/0/emx/emx.sock` while the system service used
-`/tmp/emx-0/emx.sock`. If that exact old error prevents the update, unset only the inherited runtime
-variable for the upgrade, then restart the service:
-
-```bash
-sudo env -u XDG_RUNTIME_DIR emx update
-sudo systemctl restart emx.service
-sudo emx xray paths
-```
-
-The running daemon also checks for new releases every 6h and flags it in `emx status`.
-
-The update path is the one thing emx does **not** route through its own tunnel — it talks to GitHub
-straight off the box. The release tarball is tens of megabytes, so on a slow or shaped link the
-download is bounded by *progress*, not by a stopwatch: it runs as long as bytes keep arriving, and
-gives up only after 60s of silence (`download stalled: …`).
-
-If GitHub is unreachable from the server entirely, send the update through one of your own inbounds.
-`--proxy` takes three forms:
-
-```bash
-emx update --proxy tg                          # an INBOUND NAME — port and socks credentials looked up for you
-emx update --proxy 127.0.0.1:1080              # HOST:PORT (bare means socks5)
-emx update --proxy socks5h://127.0.0.1:1080    # a full URL
-```
-
-The name form is the easy one: emx reads that inbound's port and, if it's a public socks inbound, its
-generated username/password. The inbound must be **enabled**, **socks**, and aimed at a master or an
-entry — one targeting `direct` egresses from this same box, so it can't reach what the box can't.
-
-For a proxy emx doesn't manage, authenticate explicitly:
-
-```bash
-emx update --proxy 10.0.0.1:1080 --proxy-user alice --proxy-pass 's3cret'
-```
-
-Credentials given this way are escaped for you, so `@ : / ?` in a password need no encoding. Prefer
-the environment over flags — a flag is visible to every user on the box via `ps`:
-
-```bash
-EMX_PROXY=tg EMX_PROXY_USER=alice EMX_PROXY_PASS=s3cret emx update
-```
-
-`HTTPS_PROXY` / `HTTP_PROXY` are honoured too, and `--proxy-user`/`--proxy-pass` apply to those as well.
+`HTTPS_PROXY` / `HTTP_PROXY` are honoured too.
 
 ---
 
@@ -375,237 +170,127 @@ EMX_PROXY=tg EMX_PROXY_USER=alice EMX_PROXY_PASS=s3cret emx update
 
 | Thing | What it is |
 |---|---|
-| **Entry** | An outbound — a remote server this box dials. Pure config; needs an inbound to feed it traffic. |
-| **Master** | An entry with a `Dialer`. Its transport tunnels through a node pool via `dialerProxy`. |
-| **Subscription** | A remote URL yielding a volatile pool of nodes. Never a route target by itself — consumed only inside a master's dialer. |
-| **Node** | One member of a subscription pool. Ranked fastest-first by the observatory. Never listens on a port. |
-| **Inbound** | A server listener (`vless`/`vmess`/`socks`/`trojan`/`hysteria`) you expose, routed to a **Target**. |
-| **User** | An extra client on an inbound — its own credential/link, per-user traffic, and an optional byte cap. The inbound's own key is the primary client. |
-| **Target** | Where an inbound egresses: `master:NAME` (fastest node) · `xray:NAME` (one entry) · `direct`. |
+| **Entry** | An outbound — a remote server this box dials. Needs an inbound to feed it traffic. |
+| **Master** | An entry with a `Dialer`: its transport tunnels through a node pool via `dialerProxy`. |
+| **Subscription** | A URL yielding a volatile pool of nodes. Only usable inside a master's dialer. |
+| **Node** | One pool member, ranked fastest-first by the observatory. Never listens on a port. |
+| **Inbound** | A listener you expose, routed to a **Target**. |
+| **User** | An extra client on an inbound — own credential/link, own traffic, optional byte cap. |
+| **Target** | `master:NAME` (fastest node) · `xray:NAME` (one entry) · `direct` (this server's IP). |
 
-**Dialer refs** (comma-separated): `xray:NAME` (one entry), `xraysub:NAME` (a subscription's active
-nodes), `proxy:NAME` (not yet supported). A master may mix refs, and you may run many masters — each
-gets its own slot + balancer.
+Dialer refs, comma-separated: `xray:NAME`, `xraysub:NAME` (`proxy:NAME` not supported). A master may
+mix refs; each master gets its own slot + balancer.
 
 ---
 
 ## CLI reference
 
 ```
-emx start | stop | restart | status        daemon lifecycle
-emx restart --xray                          cycle only the xray child (keeps the daemon)
-emx version                                 emx + embedded xray versions
+emx start | stop | restart | status         daemon lifecycle
+emx restart --xray                          cycle only the xray child
+emx version
 
-emx sub add <name> <url>                    add + fetch a subscription
-emx sub ls | rm <id> | rename <id> <name>
+emx sub add <name> <url> | ls | rm <id> | rename <id> <name>
 emx sub info <name>                         metadata card: quota, expiry, last fetch
-emx sub set <id> [--interval S] [--cap N] [--ua UA]   change refresh options
-emx sub enable <id> | disable <id>
-emx sub refresh [id]                        refresh one (or all); reports +added/-removed
-emx sub nodes <id>                          list nodes (fingerprint, active, disabled, latency)
-emx sub node-disable <subid> <fingerprint>  durable — survives refresh/restart
-emx sub node-enable  <subid> <fingerprint>
-emx sub test <id> [fingerprint]             real latency per node (persisted; all nodes if no fp)
+emx sub set <id> [--interval S] [--cap N] [--ua UA]
+emx sub enable <id> | disable <id> | refresh [id]
+emx sub nodes <id>                          fingerprint, active, disabled, latency
+emx sub node-enable | node-disable <subid> <fingerprint>    durable across refreshes
+emx sub test <id> [fingerprint]             real latency per node (persisted)
 
 emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>]
-emx entry ls | rm <id> | rename <id> <name>
-emx entry duplicate <id> [name] | edit <id>            clone / edit outbound JSON in $EDITOR
-emx entry test [id]                         real latency through an entry (all entries if omitted)
+emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
+emx entry test [id]
 
-emx in add [name] [--template T] [--to TARGET] [--host H] [--port N]
+emx in add [name] [-t TEMPLATE] [--to TARGET] [--host H] [--port N]
                   [--domain D] [--path P] [--email E] [--xhttp-mode MODE]
-emx in ls [--links] | rm <id>
-emx in qr <id>                              share link as a scannable QR code
-emx in duplicate <id> [name]                clone (fresh keys + port)
-emx in edit <id>                            edit the inbound JSON in $EDITOR
-emx in user add <inbound-id> <name> [--cap 10GB]      add a client with own link/quota
-emx in user ls <inbound-id>                 users + usage vs cap
-emx in user rm <user-id> | enable <user-id> | disable <user-id>
-emx in user qr <inbound-id> <user-name>     a user's link as a QR code
+emx in ls [--links] | rm <id> | qr <id> | duplicate <id> [name] | edit <id>
+emx in user add <inbound-id> <name> [--cap 10GB]
+emx in user ls <inbound-id> | rm | enable | disable <user-id>
+emx in user qr <inbound-id> <user-name>
 
-emx traffic [--window 24h|7d|all]           per-inbound/outbound charts (totals + sparkline)
-emx traffic retention [days]                how long to keep hourly history (default 8)
-emx speed                                   live ↑/↓ throughput; Ctrl-C to stop
-emx config export [-o file] | import <file> [--replace]   backup / restore all config
+emx traffic [--window 24h|7d|all] | traffic retention [days]
+emx speed                                   live ↑/↓ throughput
+emx config export [-o file] | import <file> [--replace]
 
-emx xray config                             print the generated xray config.json
-emx xray logs [-a] [-n N] [-f]              tail xray's error (or --access) log
-emx xray logcap [MB]                        per-file log size cap (0 disables; default 50)
-emx xray paths                              show the XDG paths in use
-emx xray restart                            regenerate the config + restart the xray child
-emx loglevel [debug|info|warning|error|none]   show or change the xray log level
+emx xray config | logs [-a] [-n N] [-f] | logcap [MB] | paths | restart
+emx loglevel [debug|info|warning|error|none]
+emx probe-interval [seconds]                observatory cadence (default 60)
 
-emx caddy install                            install official Caddy package (Debian/Ubuntu)
-emx caddy print | domains | apply            inspect or apply managed XHTTP domains
-emx caddy enable | disable | status          control and inspect the Caddy service
-
-emx template ls                             built-in inbound presets
-emx winner                                  current fastest node per master
-emx ui                                      open the interactive menu
+emx caddy install | print | domains | apply | enable | disable | status
+emx template ls | winner | ui
 ```
 
-Any command group run without a subcommand on a terminal opens its interactive menu. On a
-non-terminal (pipes, scripts) it prints help, so flag-driven usage stays scriptable.
+Run any group without a subcommand on a terminal for its menu; on a pipe it prints help.
 
 ### Templates
 
-Everything is auto-generated — REALITY keypairs, self-signed TLS certs (via `xray tls cert`, no domain
-required; the client link carries `allowInsecure`), UUIDs, shortIds. Run `emx template ls` for the
-live list.
+REALITY keypairs, self-signed certs (`xray tls cert`, no domain needed — the link carries
+`allowInsecure`), UUIDs and shortIds are all generated. `emx template ls` for the live list.
 
 | Name | Transport | Security |
 |---|---|---|
-| `vless-reality` *(default)* | tcp (vision) | REALITY — best against active probing |
-| `vless-reality-grpc` | gRPC | REALITY |
-| `vless-reality-xhttp` | XHTTP | REALITY |
-| `vless-tls` | tcp (vision) | self-signed TLS |
-| `vless-tls-ws` | websocket | self-signed TLS |
-| `vless-tls-xhttp` | XHTTP | self-signed TLS |
-| `vless-caddy-xhttp` | XHTTP over a Unix socket | TLS terminated by managed Caddy |
-| `vless-tls-grpc` | gRPC | self-signed TLS |
-| `vless-tls-httpupgrade` | HTTPUpgrade | self-signed TLS |
-| `vmess-ws` | websocket | none (CDN-friendly) |
-| `vmess-tcp` | tcp | none |
+| `vless-reality` *(default)* | tcp (vision) | REALITY |
+| `vless-reality-grpc` / `-xhttp` | gRPC / XHTTP | REALITY |
+| `vless-tls` / `-ws` / `-grpc` / `-xhttp` / `-httpupgrade` | tcp / ws / gRPC / XHTTP / HTTPUpgrade | self-signed TLS |
+| `vless-caddy-xhttp` | XHTTP over a Unix socket | TLS terminated by Caddy |
+| `vmess-tcp` / `vmess-ws` | tcp / websocket | none (CDN-friendly) |
 | `vmess-tls-ws` | websocket | self-signed TLS |
-| `trojan-tls` | tcp | self-signed TLS |
-| `trojan-tls-ws` | websocket | self-signed TLS |
-| `hysteria2` | hysteria (QUIC) | self-signed TLS — UDP, fast on lossy links |
-| `socks` | tcp (loopback) | none — local proxy |
-| `socks-public` | tcp (`0.0.0.0`) | username/password — public SOCKS5, e.g. for Telegram |
+| `trojan-tls` / `-ws` | tcp / websocket | self-signed TLS |
+| `hysteria2` | QUIC | self-signed TLS |
+| `socks` / `socks-public` | tcp loopback / `0.0.0.0` | none / username+password |
 
-### Public SOCKS5 / Telegram proxy
-
-`socks-public` exposes a public SOCKS5 listener with an auto-generated
-username/password (loopback `socks` stays no-auth for local use). Change the
-username later with `emx in edit <id>` (blank credentials regenerate on save).
-
-```bash
-emx in add tgproxy -t socks-public --host YOUR_PUBLIC_IP
-```
-
-It prints two links — pick per client:
-
-- `socks://<base64(user:pass)>@host:port#name` — import into xray / v2ray / sing-box
-- `tg://socks?server=…&port=…&user=…&pass=…` — tap into Telegram's proxy settings
-
-In the interactive menu, *Show client link* / *Show QR code* prompts which form
-you want. (MTProto proxies aren't supported — xray-core can't serve them.)
+`socks-public` prints both a `socks://` link and a `tg://socks?…` link for Telegram. (MTProto proxies
+aren't supported — xray-core can't serve them.)
 
 ---
 
 ## How it works
 
-xray's `dialerProxy` can't point at a balancer directly, so the tunnel is a loopback cascade:
+xray's `dialerProxy` can't point at a balancer, so the tunnel is a loopback cascade:
 
 ```
 master outbound
-  streamSettings.sockopt.dialerProxy → "dialer-<master>"        (stable socks outbound)
-      → 127.0.0.1:<slotPort>                                    (slot socks inbound)
-          → routing: inboundTag slotN-in → balancerTag slotN-bal
-              → leastPing balancer selects among  slotN-out-<key>  members
-                  → the actual node outbound
+  sockopt.dialerProxy → "dialer-<master>"      (stable socks outbound)
+    → 127.0.0.1:<slotPort>                     (slot socks inbound)
+      → routing: slotN-in → balancerTag slotN-bal
+        → leastPing picks among slotN-out-<key> members → the node outbound
 ```
 
-One shared observatory (`subjectSelector: ["slot"]`) probes every member. Because members share the
-`slotN-out-` tag **prefix**, the balancer and observatory adopt live-added members with no config
-reload — that's the zero-restart trick. A subscription refresh diffs the pool and applies the delta
-with `xray api ado/rmo`; only a change to the *set* of masters triggers a full config regen + restart.
+Members share the `slotN-out-` tag **prefix**, so the balancer and the shared observatory adopt
+live-added members with no reload — that's the zero-restart trick. A refresh diffs the pool and
+applies the delta with `xray api ado/rmo`; only a change to the *set* of masters regenerates the
+config, and a reconcile producing a byte-identical config leaves xray alone.
 
 ### Fail closed, never direct
 
-An inbound routed through a master or an entry must **never** egress from this box's own IP. Only a
-`direct` target may do that, and the daemon names every such inbound in the log on each reconcile so
-it can't happen by accident. Four rules keep that true:
+An inbound routed through a master must never egress from this box's IP. Four rules:
 
-- **`block` is `outbounds[0]`.** xray takes the first outbound as its default handler — the one used
-  whenever routing yields no tag. A blackhole there makes any routing miss fail closed; `direct`
-  stays in the list but is reachable only by explicit tag.
-- **Every balancer carries `fallbackTag: "block"`.** `leastPing` picks nothing until the observatory
-  has marked at least one member alive — a window after every start, and after a refresh replaces the
-  whole pool. Without the fallback that window drops to the default handler.
-- **An enabled master always gets a slot**, even when its dialer resolves to zero members (sub not
-  fetched yet, all nodes inactive, a dangling ref). Dropping the slot would strip the `dialerProxy`
-  hop and let the master dial straight off this box.
-- **Live member sync adds before it removes.** A refresh that rotates every fingerprint is a full
-  replace; removing first would empty the pool mid-flight.
+- `block` is `outbounds[0]`, so any routing miss hits a blackhole (xray's default handler).
+- Every balancer has `fallbackTag: "block"` — `leastPing` picks nothing until the first probe lands.
+- An enabled master always gets a slot, even with zero members, so the `dialerProxy` hop never
+  disappears.
+- Live member sync adds before it removes, so a full pool rotation is never empty mid-flight.
 
-Because a blocked master and a broken one look identical from outside, `emx status` and `emx winner`
-report pool size and the current pick, and `emx in ls` marks the inbounds that legitimately egress
-from this box:
+`emx status` and `emx winner` report pool size and the current pick; `emx in ls` marks the inbounds
+that legitimately use this server's IP. The blackout after a restart lasts until the first probe
+lands — `emx probe-interval 15` shortens it (5–3600s).
 
-```
-$ emx status
-pools:
-  mymaster: 0 members, BLOCKED — pool empty (refresh its subscription or check its dialer)
+### Health, testing, accounting
 
-$ emx winner
-MASTER    MEMBERS  FASTEST NODE
-mymaster  12       de-fra-03
+- **Watchdog** restarts a crashed xray with backoff. Separately the daemon calls xray's local stats
+  API every 30s and force-restarts after three consecutive failures; `emx status` shows
+  `health: responsive` and the health-restart count.
+- **`emx sub test` / `emx entry test`** never touch the live xray: a throwaway xray gets one no-auth
+  socks inbound per config on ephemeral loopback ports (a master's `dialerProxy` hop is stripped) and
+  the probe URL is fetched through each concurrently, in batches of 24 with halving retry. Results
+  persist per fingerprint. Different measurement from `emx winner`, which is the observatory's.
+- **Traffic**: stats are always enabled; counters are sampled every minute (reset-safe) into hourly
+  buckets + lifetime totals. The gRPC api binds a loopback port from `11932`, advancing if taken.
+- **Bounded disk**: logs roll at `emx xray logcap` (default 50 MB each, `0` disables); hourly buckets
+  are pruned to `emx traffic retention` (default 8 days).
 
-$ emx in ls
-ID  NAME  PROTO  PORT   SECURITY  TARGET                     ENABLED
-1   gate  vless  11800  reality   master:mymaster            true
-2   loc   socks  11801            direct  ⚠ this server's IP  true
-```
-
-The blackout after a restart lasts until the observatory's first probe lands, so it is bounded by the
-probe cadence:
-
-```bash
-emx probe-interval        # show (default 60s)
-emx probe-interval 15     # shorter blackout, more probe traffic (5-3600s)
-```
-
-Restarts themselves are now rare: `Generate` is deterministic and a reconcile that produces a
-byte-identical config leaves xray alone instead of cycling it.
-
-The process watchdog handles crashes immediately. Separately, the health monitor calls xray's local
-stats API every 30 seconds; after three consecutive failures it force-restarts the child. A bad
-generated config is caught by xray's startup validation/crash loop, while a live but stalled process
-is caught by the API monitor:
-
-```text
-$ sudo emx status
-daemon:  running (pid 1201, up 842s)
-xray:    running (pid 1210, restarts 0)
-health:  responsive (automatic health restarts 0)
-caddy:   installed (active=true, enabled=true)
-```
-
-### Testing configs
-
-`emx sub test <id>` / `emx entry test [id]` never touch the live xray. Each run writes a throwaway
-config with one no-auth socks inbound on an ephemeral loopback port per config, routed straight to
-that config's outbound (a master's `dialerProxy` hop is stripped — the probe measures the server
-itself), starts its own xray, and fetches the probe URL through every port concurrently. The reported
-number is the full round trip (dial + handshake + response).
-
-Configs are probed in batches of 24; if xray refuses to start for a batch — one outbound it won't
-accept — the batch is split in half and retried, so the failure lands on the config that caused it
-instead of its neighbours. Node latencies are persisted by fingerprint, so `emx sub nodes` and the
-TUI show the last measurement; a failed probe clears the old figure rather than keeping a stale one.
-
-Note this is a *different* measurement from `emx winner`: that reflects xray's own observatory probes
-driving the `leastPing` balancer for live routing.
-
-### Traffic accounting
-
-xray's stats API is always enabled (`policy.system.stats*` + per-user `levels.0.statsUser*`). The
-daemon samples the cumulative byte counters once a minute, diffs them (reset-safe across xray
-restarts), and stores hourly buckets + lifetime totals in sqlite — that feeds `emx traffic`, the
-per-user usage, and byte-cap enforcement. The gRPC api binds a loopback port starting at `11932`,
-**auto-advancing** if it's taken (so it never clashes with another xray on the same host).
-
-### Disk usage is bounded
-
-- **Logs** — xray's access/error logs are capped (`emx xray logcap`, default **50 MB** each). Past the
-  cap the file is rolled to `*.prev` and truncated in place — xray keeps writing, no restart. Peak per
-  log is ~2× the cap. Set `0` to disable rotation.
-- **Traffic metadata** — hourly buckets are pruned to a rolling window (`emx traffic retention`,
-  default **8 days**); lifetime totals are a single row per inbound/outbound/user. Subscription nodes
-  are volatile (replaced each fetch, capped by the sub's node cap). Nothing grows unbounded.
-
-### Paths (XDG)
+### Paths
 
 ```
 data     $XDG_DATA_HOME/emx      sqlite database
@@ -614,46 +299,39 @@ cache    $XDG_CACHE_HOME/emx     extracted xray binary + geo data
 runtime  $XDG_RUNTIME_DIR/emx    control socket, pid, generated config.json
 ```
 
-For root, data/config/state/cache paths are pinned under `/root` and runtime files always use
-`/tmp/emx-0`. This makes `sudo emx` and a systemd system service agree even if sudo preserves a
-user's `HOME`/XDG variables or only the login shell has `XDG_RUNTIME_DIR=/run/user/0`. Other users
-follow XDG and fall back to `/tmp/emx-<uid>` for runtime files.
+Root pins data/config/state/cache under `/root` and runtime under `/tmp/emx-0`, ignoring XDG and
+`TMPDIR`. Other users follow XDG, falling back to `/tmp/emx-<uid>`. A daemon starting on a new layout
+adopts a database left by an older one, and a non-root run defers to the root instance
+(`EMX_USER_SCOPE=1` overrides).
 
-The normal daemon needs no elevated privileges—it uses loopback listeners and a child process. A
-system-wide root daemon is recommended when emx also manages Caddy and `/etc/caddy/Caddyfile`. The
-CLI talks to its matching daemon over a gRPC Unix socket.
+The daemon needs no privileges of its own — loopback listeners plus a child process — but root is
+required for Caddy and `/etc/caddy/Caddyfile`.
 
 ---
 
 ## Development
 
 ```bash
-make test          # unit tests (core/ is OS-agnostic; runs anywhere)
+make test          # unit tests (core/ is OS-agnostic)
 make vet
 make proto         # regenerate gRPC stubs after editing api/emx.proto
 make build
-
-make release BUMP=patch   # bump + push a release tag (builds all platforms via CI)
+make release BUMP=patch
 ```
 
-Config generation is verified against the real xray binary with `xray -test` (validate-only, binds
-nothing). The live end-to-end routing test is opt-in — it binds fixed loopback ports:
+Config generation is verified against the real xray binary (`xray -test`, binds nothing). The live
+routing test is opt-in — it binds fixed loopback ports:
 
 ```bash
 EMX_E2E=1 go test ./daemon/ -run EndToEnd
 ```
 
-### Layout
-
 ```
-cmd/emx/          cobra CLI, bubbletea TUI, gRPC client (traffic/QR/backup/users views)
-core/xray/        OS-agnostic: models, store, link parser, config Generate, dialer, keygen, templates,
-                  traffic stats, multi-user
-daemon/           supervisor (Reconcile / SyncDialerMembers), watchdog, xray api, gRPC server,
-                  scheduler, traffic sampler, backup/user handlers
-api/              emx.proto + generated stubs
-internal/         paths (XDG), xraybin (go:embed)
-scripts/          fetch-xray.sh
+cmd/emx/     cobra CLI, bubbletea TUI, gRPC client
+core/xray/   OS-agnostic: models, store, link parser, config Generate, dialer, keygen, templates
+daemon/      supervisor, watchdog, xray api, gRPC server, scheduler, traffic sampler
+api/         emx.proto + generated stubs
+internal/    paths (XDG), xraybin (go:embed)
 ```
 
 ---
