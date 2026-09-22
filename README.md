@@ -214,6 +214,7 @@ emx speed                                   live ↑/↓ throughput
 emx config export [-o file] | import <file> [--replace]
 
 emx xray config | logs [-a] [-n N] [-f] | logcap [MB] | paths | restart
+emx xray reap                               stop orphaned xray left by a killed daemon
 emx loglevel [debug|info|warning|error|none]
 emx probe-interval [seconds]                observatory cadence (default 60)
 
@@ -281,6 +282,11 @@ lands — `emx probe-interval 15` shortens it (5–3600s).
 - **Watchdog** restarts a crashed xray with backoff. Separately the daemon calls xray's local stats
   API every 30s and force-restarts after three consecutive failures; `emx status` shows
   `health: responsive` and the health-restart count.
+- **No orphans**: the xray child gets `Pdeathsig`, so a SIGKILLed or OOM-killed daemon takes it down
+  too. Any orphan that predates this is reaped when the daemon starts and by `emx update` /
+  `emx restart`; `emx xray reap` does it on demand. Orphans matter because the listeners share the
+  port, so an old one keeps answering a share of the connections with an old config. Only xray
+  started from emx's own cache path is ever signalled.
 - **`emx sub test` / `emx entry test`** never touch the live xray: a throwaway xray gets one no-auth
   socks inbound per config on ephemeral loopback ports (a master's `dialerProxy` hop is stripped) and
   the probe URL is fetched through each concurrently, in batches of 24 with halving retry. Results

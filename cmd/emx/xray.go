@@ -12,6 +12,7 @@ import (
 	"time"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/daemon"
 	"github.com/ehsan200/em-xray/internal/paths"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +23,32 @@ func xrayCmd() *cobra.Command {
 		Use:   "xray",
 		Short: "inspect the running xray: config json, logs, paths",
 	}
-	c.AddCommand(xrayConfigCmd(), xrayLogsCmd(), xrayPathsCmd(), xrayLogCapCmd(), xrayRestartCmd())
+	c.AddCommand(xrayConfigCmd(), xrayLogsCmd(), xrayPathsCmd(), xrayLogCapCmd(), xrayRestartCmd(), xrayReapCmd())
 	return c
+}
+
+// xrayReapCmd cleans up after a daemon that died without stopping its child.
+// Those orphans keep the inbound ports open (the listeners share the port), so
+// clients intermittently reach an old config.
+func xrayReapCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reap",
+		Short: "stop orphaned xray processes left by a killed daemon",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+			keep := currentXrayPID(cmd)
+			strays := daemon.ReapStrayXray(paths.Default(), nil, keep)
+			if len(strays) == 0 {
+				fmt.Fprintln(out, "no orphaned xray processes")
+				return nil
+			}
+			fmt.Fprintf(out, "stopped %d orphaned xray process(es): %v\n", len(strays), strays)
+			if keep != 0 {
+				fmt.Fprintf(out, "kept the running daemon's xray (pid %d)\n", keep)
+			}
+			return nil
+		},
+	}
 }
 
 // xrayRestartCmd force-cycles the xray child without touching the daemon.

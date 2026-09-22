@@ -159,7 +159,7 @@ func restartXray(cmd *cobra.Command) error {
 func restartDaemon(cmd *cobra.Command) error {
 	// An upgrade can move the runtime directory, so a daemon started by the
 	// previous build is invisible to the pid file but still owns an xray child.
-	stopLegacyDaemon(cmd)
+	stopStaleProcesses(cmd)
 	// Keep a systemd-managed daemon under systemd. A graceful RPC shutdown is
 	// considered successful, so Restart=on-failure would otherwise leave the
 	// unit inactive while emx spawned an unmanaged replacement.
@@ -195,17 +195,38 @@ func systemdDaemonActive() bool {
 	return systemctl(os.Geteuid() == 0, "is-active", "--quiet", systemdUnitName).Run() == nil
 }
 
-// stopLegacyDaemon terminates a daemon left behind by a previous runtime
-// layout. Two daemons would fight over the xray api port and config file.
-func stopLegacyDaemon(cmd *cobra.Command) {
-	dir, pid, ok := daemon.LegacyDaemon(paths.Default())
-	if !ok {
-		return
+// stopStaleProcesses clears everything a previous daemon may have left behind:
+// a daemon from an older runtime layout, and any orphaned xray still holding
+// the inbound ports. Both would otherwise keep serving an old config alongside
+// the new one, since the listeners share the port.
+func stopStaleProcesses(cmd *cobra.Command) {
+	out := cmd.OutOrStdout()
+	if dir, pid, ok := daemon.LegacyDaemon(paths.Default()); ok {
+		fmt.Fprintf(out, "stopping daemon from the previous layout (pid %d, %s)\n", pid, dir)
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Signal(syscall.SIGTERM)
+		}
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "stopping daemon from the previous layout (pid %d, %s)\n", pid, dir)
-	if proc, err := os.FindProcess(pid); err == nil {
-		_ = proc.Signal(syscall.SIGTERM)
+	if reaped := daemon.ReapStrayXray(paths.Default(), nil, currentXrayPID(cmd)); len(reaped) > 0 {
+		fmt.Fprintf(out, "stopped %d orphaned xray process(es): %v\n", len(reaped), reaped)
 	}
+}
+
+// currentXrayPID is the xray the live daemon owns, so cleanup never kills the
+// child of a daemon that is still doing its job. 0 when nothing answers.
+func currentXrayPID(cmd *cobra.Command) int {
+	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+	defer cancel()
+	c, conn, err := dialReady(ctx)
+	if err != nil {
+		return 0
+	}
+	defer conn.Close()
+	st, err := c.Status(ctx, &emxv1.StatusRequest{})
+	if err != nil || st.Xray == nil {
+		return 0
+	}
+	return int(st.Xray.Pid)
 }
 
 // daemonPresent reports whether any emx daemon is running for this scope: the

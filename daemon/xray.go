@@ -405,6 +405,7 @@ func xrayCmdFactory(p paths.Paths, logger *log.Logger) CmdFactory {
 			return nil, fmt.Errorf("no xray config yet: %w", err)
 		}
 		cmd := exec.Command(bin, "run", "-c", p.XrayConfig())
+		dieWithParent(cmd) // never outlive the daemon and keep holding the ports
 		cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+p.AssetDir())
 		// xray writes its own access/error logs (paths baked into config); its
 		// stdout/stderr go to the daemon error log for startup diagnostics.

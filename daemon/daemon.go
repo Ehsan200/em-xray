@@ -82,6 +82,11 @@ func Run(ctx context.Context) error {
 	}
 	defer os.Remove(p.Socket())
 
+	// No other daemon owns this box at this point (both checks above passed), so
+	// any emx xray still running is an orphan from a killed daemon — it would
+	// otherwise keep serving an old config on the same ports via SO_REUSEPORT.
+	ReapStrayXray(p, logger)
+
 	// An upgrade can move where the database is looked up; bring the previous
 	// one forward so an existing configuration survives the change.
 	if err := AdoptLegacyDB(p, logger); err != nil {
