@@ -289,6 +289,21 @@ func (s *Server) InboundAdd(ctx context.Context, req *emxv1.InboundAddRequest) (
 		return nil, err
 	}
 	in.PublicHost = req.PublicHost
+	if req.Path != "" {
+		in.Path = req.Path
+	}
+	if req.Email != "" {
+		in.ClientEmail = req.Email
+	}
+	if req.XhttpMode != "" {
+		in.XHTTPMode = req.XhttpMode
+	}
+	if xray.IsCaddyXHTTP(*in) && in.PublicHost == "" {
+		return nil, fmt.Errorf("the vless-caddy-xhttp template requires --domain")
+	}
+	if err := xray.Materialize(in); err != nil {
+		return nil, err
+	}
 	if req.Port != 0 {
 		in.Port = int(req.Port)
 	}
@@ -366,7 +381,7 @@ func (s *Server) InboundSetConfig(ctx context.Context, req *emxv1.SetConfigReque
 	if err := xray.Materialize(&edited); err != nil {
 		return nil, err
 	}
-	if edited.Port == 0 {
+	if edited.Port == 0 && !xray.IsUnixInbound(edited) {
 		// Reuse the current port if it had one, else let the store assign.
 		edited.Port = cur.Port
 	}
@@ -403,6 +418,8 @@ func (s *Server) inboundInfo(in xray.Inbound) *emxv1.InboundInfo {
 		Id: uint32(in.ID), Name: in.Name, Protocol: in.Protocol, Port: int32(in.Port),
 		Security: in.Security, Target: in.Target, Enabled: in.Enabled, Uuid: in.UUID,
 		PublicHost: host, ShareLink: xray.ShareLink(in, host),
-		TgLink: xray.TelegramSocksLink(in, host),
+		TgLink:  xray.TelegramSocksLink(in, host),
+		Network: in.Network, Path: in.Path, Listen: in.Listen,
+		Email: in.ClientEmail, XhttpMode: in.XHTTPMode,
 	}
 }

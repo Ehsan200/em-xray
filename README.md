@@ -22,7 +22,7 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
   balancer picks the winner. Nodes never listen on ports; they're outbounds ranked by live latency.
 - **Zero-restart churn** — a subscription refresh, node enable/disable, or cap change updates the
   live pool over xray's gRPC API (`ado`/`rmo`), never restarting xray or dropping connections.
-- **Server mode** — create an inbound from 16 built-in templates (vless/vmess/trojan × reality/TLS ×
+- **Server mode** — create an inbound from built-in templates (vless/vmess/trojan × reality/TLS ×
   tcp/ws/grpc/xhttp/httpupgrade, plus hysteria2/QUIC) with one command; UUID, REALITY keypair, and **self-signed TLS
   certs** (via `xray tls cert`, no domain needed) are auto-generated and the client share-link + a
   scannable **QR code** are printed.
@@ -35,6 +35,12 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
   probe URL is fetched through each, concurrently. Node results are persisted and shown in the lists.
 - **Restart levers** — `emx restart --xray` (or `emx xray restart`) force-cycles just the xray child
   when it wedges; `emx restart` bounces the whole daemon. Both are in the TUI under *Restart*.
+- **Stall recovery** — the daemon checks xray's local API every 30 seconds. Three consecutive
+  failures trigger a clean xray restart; `emx status` shows whether xray is responsive and how many
+  health restarts have occurred.
+- **Managed Caddy/XHTTP** — install and control Caddy from emx, attach multiple domains to
+  socket-backed VLESS/XHTTP inbounds, validate the generated Caddyfile, and reload without hand
+  writing proxy routes.
 - **Backup / restore** — export the whole config (inbounds + entries + subscriptions) to one JSON
   file and import it back, merge or replace.
 - **Self-managed daemon** — `emx start` detaches into the background, supervises the xray child, and
@@ -61,6 +67,26 @@ curl -LO "https://github.com/Ehsan200/em-xray/releases/download/$VERSION/emx-$VE
 tar -xzf "emx-$VERSION-$OS-$ARCH.tar.gz"          # extracts emx-$OS-$ARCH/
 sudo install "emx-$OS-$ARCH/emx" /usr/local/bin/emx
 emx version
+```
+
+### Make `emx` global on a server
+
+Putting the binary in `/usr/local/bin` makes `emx` available to every shell and to systemd. This
+works for either a downloaded binary or a local build:
+
+```bash
+sudo install -m 0755 ./emx /usr/local/bin/emx
+command -v emx          # /usr/local/bin/emx
+emx version
+```
+
+When Caddy integration is used, run emx as a system service so Caddy and emx share one system-wide
+configuration. Use `sudo emx ...` consistently; a non-root emx daemon has a different database and
+control socket.
+
+```bash
+sudo emx systemd install --system --now
+sudo emx status
 ```
 
 One-liner for the latest linux/amd64 build:
@@ -120,6 +146,124 @@ emx in user ls 1                           # usage vs cap per user
 ```
 
 Prefer menus? Just run `emx` (or `emx sub`, `emx in`, `emx entry`) with no arguments.
+
+### Caddy + Cloudflare + XHTTP
+
+Use the `vless-caddy-xhttp` template when Caddy owns Cloudflare's supported HTTP and HTTPS ports and
+forwards VLESS/XHTTP to xray over a Unix socket. Xray itself does not terminate TLS in this setup;
+Caddy obtains the certificate and the generated client link uses the public domain on port 443.
+
+The generated Caddyfile listens on HTTP ports `80`, `8080`, `8880`, `2052`, `2082`, `2086`, `2095`
+and HTTPS ports `443`, `2053`, `2083`, `2087`, `2096`, `8443`, matching Cloudflare's
+[proxied-port list](https://developers.cloudflare.com/fundamentals/reference/network-ports/).
+
+Before starting:
+
+- create the domain's DNS record and point it to this server;
+- if Cloudflare proxies the record, use an SSL/TLS mode that validates the origin certificate;
+- allow the listed TCP ports through the server firewall (at minimum 80 and 443 are needed for the
+  default link and normal certificate provisioning);
+- run the system-wide emx daemon shown above.
+
+Install Caddy from its official Debian/Ubuntu repository:
+
+```bash
+sudo emx caddy install
+sudo emx caddy status
+```
+
+Create an inbound. UUID, email, path, Unix socket, and client link are generated automatically.
+`packet-up` is the template default:
+
+```bash
+sudo emx in add edge \
+  --template vless-caddy-xhttp \
+  --domain x.example.com \
+  --to direct
+```
+
+Because this is a Caddy-managed inbound, emx validates and applies the Caddyfile automatically when
+it has root access. Applying explicitly is safe and useful after manual edits:
+
+```bash
+sudo emx caddy print       # preview
+sudo emx caddy domains     # domain, path, inbound name
+sudo emx caddy apply       # validate, back up, write, and reload
+```
+
+Route the same kind of inbound through a master instead of the server's direct IP:
+
+```bash
+sudo emx in add edge-tunnel \
+  -t vless-caddy-xhttp \
+  --domain tunnel.example.com \
+  --to master:mymaster
+```
+
+Multiple domains are just multiple inbounds. Each gets an independent credential, path, and socket:
+
+```bash
+sudo emx in add alpha -t vless-caddy-xhttp --domain a.example.com --to master:mymaster
+sudo emx in add beta  -t vless-caddy-xhttp --domain b.example.com --to master:mymaster
+sudo emx caddy domains
+```
+
+Values can also be supplied explicitly:
+
+```bash
+sudo emx in add custom \
+  -t vless-caddy-xhttp \
+  --domain x.example.com \
+  --path /generated-path/ \
+  --email ehsan@xhttp.com \
+  --xhttp-mode packet-up \
+  --to direct
+```
+
+The corresponding part of `sudo emx xray config` has the same shape as a hand-written Xray
+inbound—there is no Iran-specific or other regional routing added:
+
+```json
+{
+  "listen": "/dev/shm/emx-xhttp-custom.sock,0666",
+  "protocol": "vless",
+  "settings": {
+    "clients": [
+      {
+        "id": "generated-or-supplied-uuid",
+        "email": "ehsan@xhttp.com",
+        "level": 0
+      }
+    ],
+    "decryption": "none"
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "xhttpSettings": {
+      "path": "/generated-path/",
+      "mode": "packet-up"
+    }
+  }
+}
+```
+
+Edit them later with `sudo emx in edit <id>` or choose **Inbounds → Edit JSON** in the menu. The
+important fields are `UUID`, `ClientEmail`, `Path`, `XHTTPMode`, and `PublicHost`. Saving regenerates
+the Xray config and reapplies Caddy. Changing UUID, path, or domain requires importing the new client
+link; changing `ClientEmail` changes the key used for future traffic statistics.
+
+```bash
+sudo emx in ls --links
+sudo emx in qr 1
+```
+
+Caddy service controls are also available in the main interactive menu:
+
+```bash
+sudo emx caddy enable
+sudo emx caddy disable
+sudo emx caddy status
+```
 
 ### Keep it running (systemd)
 
@@ -223,6 +367,7 @@ emx entry duplicate <id> [name] | edit <id>            clone / edit outbound JSO
 emx entry test [id]                         real latency through an entry (all entries if omitted)
 
 emx in add [name] [--template T] [--to TARGET] [--host H] [--port N]
+                  [--domain D] [--path P] [--email E] [--xhttp-mode MODE]
 emx in ls [--links] | rm <id>
 emx in qr <id>                              share link as a scannable QR code
 emx in duplicate <id> [name]                clone (fresh keys + port)
@@ -243,6 +388,10 @@ emx xray logcap [MB]                        per-file log size cap (0 disables; d
 emx xray paths                              show the XDG paths in use
 emx xray restart                            regenerate the config + restart the xray child
 emx loglevel [debug|info|warning|error|none]   show or change the xray log level
+
+emx caddy install                            install official Caddy package (Debian/Ubuntu)
+emx caddy print | domains | apply            inspect or apply managed XHTTP domains
+emx caddy enable | disable | status          control and inspect the Caddy service
 
 emx template ls                             built-in inbound presets
 emx winner                                  current fastest node per master
@@ -266,6 +415,7 @@ live list.
 | `vless-tls` | tcp (vision) | self-signed TLS |
 | `vless-tls-ws` | websocket | self-signed TLS |
 | `vless-tls-xhttp` | XHTTP | self-signed TLS |
+| `vless-caddy-xhttp` | XHTTP over a Unix socket | TLS terminated by managed Caddy |
 | `vless-tls-grpc` | gRPC | self-signed TLS |
 | `vless-tls-httpupgrade` | HTTPUpgrade | self-signed TLS |
 | `vmess-ws` | websocket | none (CDN-friendly) |
@@ -363,6 +513,19 @@ emx probe-interval 15     # shorter blackout, more probe traffic (5-3600s)
 Restarts themselves are now rare: `Generate` is deterministic and a reconcile that produces a
 byte-identical config leaves xray alone instead of cycling it.
 
+The process watchdog handles crashes immediately. Separately, the health monitor calls xray's local
+stats API every 30 seconds; after three consecutive failures it force-restarts the child. A bad
+generated config is caught by xray's startup validation/crash loop, while a live but stalled process
+is caught by the API monitor:
+
+```text
+$ sudo emx status
+daemon:  running (pid 1201, up 842s)
+xray:    running (pid 1210, restarts 0)
+health:  responsive (automatic health restarts 0)
+caddy:   installed (active=true, enabled=true)
+```
+
 ### Testing configs
 
 `emx sub test <id>` / `emx entry test [id]` never touch the live xray. Each run writes a throwaway
@@ -405,8 +568,9 @@ cache    $XDG_CACHE_HOME/emx     extracted xray binary + geo data
 runtime  $XDG_RUNTIME_DIR/emx    control socket, pid, generated config.json
 ```
 
-The daemon needs **no elevated privileges** — it's all loopback SOCKS + a child process. The CLI
-talks to the daemon over a gRPC unix socket.
+The normal daemon needs no elevated privileges—it uses loopback listeners and a child process. A
+system-wide root daemon is recommended when emx also manages Caddy and `/etc/caddy/Caddyfile`. The
+CLI talks to its matching daemon over a gRPC Unix socket.
 
 ---
 

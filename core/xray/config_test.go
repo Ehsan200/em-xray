@@ -105,6 +105,28 @@ func TestBuildInboundSocksNoAuth(t *testing.T) {
 	}
 }
 
+func TestBuildCaddyXHTTPInbound(t *testing.T) {
+	in, err := NewInboundFromTemplate("edge", "vless-caddy-xhttp", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.PublicHost = "x.example.com"
+	m := genMap(t, nil, []Inbound{*in})
+	ib := m["inbounds"].([]any)[0].(map[string]any)
+	if _, ok := ib["port"]; ok {
+		t.Fatal("Unix-socket inbound must not emit a TCP port")
+	}
+	if ib["listen"] != in.Listen {
+		t.Fatalf("listen = %v, want %q", ib["listen"], in.Listen)
+	}
+	if got := dig(t, ib, "settings", "clients", 0, "email"); got != in.ClientEmail {
+		t.Fatalf("email = %v, want %q", got, in.ClientEmail)
+	}
+	if got := dig(t, ib, "streamSettings", "xhttpSettings", "mode"); got != "packet-up" {
+		t.Fatalf("mode = %v", got)
+	}
+}
+
 func TestGenerateRejectsMissingTarget(t *testing.T) {
 	inbounds := []Inbound{{Name: "x", Enabled: true, Protocol: "socks", Port: 11800, Target: "xray:ghost"}}
 	if _, err := Generate(nil, inbounds, nil, GenOptions{}); err == nil {
@@ -150,6 +172,7 @@ func TestAssignInboundPorts(t *testing.T) {
 		{Name: "new1", Enabled: true},
 		{Name: "off", Enabled: false}, // disabled: no port
 		{Name: "new2", Enabled: true},
+		{Name: "unix", Enabled: true, Listen: "/tmp/emx.sock,0666"},
 	}
 	changed := AssignInboundPorts(inbounds)
 	if len(changed) != 2 {
@@ -163,6 +186,9 @@ func TestAssignInboundPorts(t *testing.T) {
 	}
 	if inbounds[2].Port != 0 {
 		t.Error("disabled inbound must not get a port")
+	}
+	if inbounds[4].Port != 0 {
+		t.Error("Unix-socket inbound must not get a TCP port")
 	}
 }
 

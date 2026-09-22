@@ -3,6 +3,7 @@ package xray
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Template is a named preset of inbound defaults. It captures the "shape" of a
@@ -63,6 +64,10 @@ var templates = map[string]Template{
 		Name: "vless-tls-xhttp", Description: "vless + TLS over XHTTP (self-signed)",
 		Protocol: "vless", Network: "xhttp", Security: "tls", Listen: "0.0.0.0",
 		Path: "/",
+	},
+	"vless-caddy-xhttp": {
+		Name: "vless-caddy-xhttp", Description: "vless + XHTTP behind Caddy/Cloudflare on HTTPS",
+		Protocol: "vless", Network: "xhttp", Security: "none",
 	},
 	"vless-tls-grpc": {
 		Name: "vless-tls-grpc", Description: "vless + TLS over gRPC (self-signed)",
@@ -169,6 +174,16 @@ func NewInboundFromTemplate(name, templateName, target string) (*Inbound, error)
 		Enabled:     true,
 		Target:      target,
 	}
+	if templateName == "vless-caddy-xhttp" {
+		in.Listen = CaddySocketListen(n)
+		path, err := NewXHTTPPath()
+		if err != nil {
+			return nil, err
+		}
+		in.Path = path
+		in.XHTTPMode = "packet-up"
+		in.ClientEmail = sanitizeKey(n) + "@xhttp.local"
+	}
 	if err := Materialize(in); err != nil {
 		return nil, err
 	}
@@ -186,11 +201,29 @@ func Materialize(in *Inbound) error {
 			in.Network = "tcp"
 		}
 	}
+	if in.Network == "xhttp" {
+		if in.XHTTPMode == "" {
+			in.XHTTPMode = "auto"
+		}
+		switch in.XHTTPMode {
+		case "auto", "packet-up", "stream-up", "stream-one":
+		default:
+			return fmt.Errorf("unsupported xhttp mode %q", in.XHTTPMode)
+		}
+	}
 	if in.Listen == "" {
 		if in.Protocol == "socks" {
 			in.Listen = "127.0.0.1"
 		} else {
 			in.Listen = "0.0.0.0"
+		}
+	}
+	if IsCaddyXHTTP(*in) && in.Path != "" {
+		if !strings.HasPrefix(in.Path, "/") {
+			in.Path = "/" + in.Path
+		}
+		if !strings.HasSuffix(in.Path, "/") {
+			in.Path += "/"
 		}
 	}
 	switch in.Protocol {
@@ -271,4 +304,38 @@ func Materialize(in *Inbound) error {
 		}
 	}
 	return nil
+}
+
+// CaddySocketListen is the xray listen value used by a Caddy-backed XHTTP
+// inbound. The mode suffix lets the system Caddy user connect to the socket.
+func CaddySocketListen(name string) string {
+	return "/dev/shm/emx-xhttp-" + strings.ToLower(sanitizeKey(name)) + ".sock,0666"
+}
+
+// NewXHTTPPath returns an unguessable path with the trailing slash expected by
+// XHTTP's per-session request paths.
+func NewXHTTPPath() (string, error) {
+	id, err := NewPassword()
+	if err != nil {
+		return "", err
+	}
+	return "/" + id + "/", nil
+}
+
+// IsUnixInbound reports whether xray listens on a filesystem/abstract Unix
+// socket instead of a TCP port. A trailing ",MODE" is xray's permission syntax.
+func IsUnixInbound(in Inbound) bool {
+	return strings.HasPrefix(in.Listen, "/") || strings.HasPrefix(in.Listen, "@")
+}
+
+// IsCaddyXHTTP identifies inbounds whose public HTTPS endpoint is terminated by
+// Caddy and forwarded to xray over a Unix socket.
+func IsCaddyXHTTP(in Inbound) bool {
+	return in.Network == "xhttp" && in.Security == "none" && IsUnixInbound(in)
+}
+
+// UnixSocketPath removes xray's optional permission suffix from Listen.
+func UnixSocketPath(listen string) string {
+	path, _, _ := strings.Cut(listen, ",")
+	return path
 }

@@ -2146,13 +2146,18 @@ func (x *StatusReply) GetUpdateAvailable() bool {
 }
 
 type XrayState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Running       bool                   `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"`
-	Pid           int32                  `protobuf:"varint,2,opt,name=pid,proto3" json:"pid,omitempty"`
-	Restarts      int32                  `protobuf:"varint,3,opt,name=restarts,proto3" json:"restarts,omitempty"`
-	LastError     string                 `protobuf:"bytes,4,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Running         bool                   `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"`
+	Pid             int32                  `protobuf:"varint,2,opt,name=pid,proto3" json:"pid,omitempty"`
+	Restarts        int32                  `protobuf:"varint,3,opt,name=restarts,proto3" json:"restarts,omitempty"`
+	LastError       string                 `protobuf:"bytes,4,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	HealthChecked   bool                   `protobuf:"varint,5,opt,name=health_checked,json=healthChecked,proto3" json:"health_checked,omitempty"`
+	Responsive      bool                   `protobuf:"varint,6,opt,name=responsive,proto3" json:"responsive,omitempty"`
+	HealthMessage   string                 `protobuf:"bytes,7,opt,name=health_message,json=healthMessage,proto3" json:"health_message,omitempty"`
+	HealthRestarts  int32                  `protobuf:"varint,8,opt,name=health_restarts,json=healthRestarts,proto3" json:"health_restarts,omitempty"`
+	LastHealthCheck int64                  `protobuf:"varint,9,opt,name=last_health_check,json=lastHealthCheck,proto3" json:"last_health_check,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *XrayState) Reset() {
@@ -2211,6 +2216,41 @@ func (x *XrayState) GetLastError() string {
 		return x.LastError
 	}
 	return ""
+}
+
+func (x *XrayState) GetHealthChecked() bool {
+	if x != nil {
+		return x.HealthChecked
+	}
+	return false
+}
+
+func (x *XrayState) GetResponsive() bool {
+	if x != nil {
+		return x.Responsive
+	}
+	return false
+}
+
+func (x *XrayState) GetHealthMessage() string {
+	if x != nil {
+		return x.HealthMessage
+	}
+	return ""
+}
+
+func (x *XrayState) GetHealthRestarts() int32 {
+	if x != nil {
+		return x.HealthRestarts
+	}
+	return 0
+}
+
+func (x *XrayState) GetLastHealthCheck() int64 {
+	if x != nil {
+		return x.LastHealthCheck
+	}
+	return 0
 }
 
 type ShutdownRequest struct {
@@ -2939,7 +2979,10 @@ type InboundAddRequest struct {
 	Template      string                 `protobuf:"bytes,2,opt,name=template,proto3" json:"template,omitempty"`                       // "" => default (vless-reality)
 	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`                           // master:NAME | xray:NAME | direct
 	PublicHost    string                 `protobuf:"bytes,4,opt,name=public_host,json=publicHost,proto3" json:"public_host,omitempty"` // address clients dial (for the share link)
-	Port          int32                  `protobuf:"varint,5,opt,name=port,proto3" json:"port,omitempty"`                              // 0 => auto-assign
+	Port          int32                  `protobuf:"varint,5,opt,name=port,proto3" json:"port,omitempty"`                              // 0 => auto-assign (or no TCP port for Unix sockets)
+	Path          string                 `protobuf:"bytes,6,opt,name=path,proto3" json:"path,omitempty"`                               // transport path; blank => template default/random
+	Email         string                 `protobuf:"bytes,7,opt,name=email,proto3" json:"email,omitempty"`                             // primary client's stats identity
+	XhttpMode     string                 `protobuf:"bytes,8,opt,name=xhttp_mode,json=xhttpMode,proto3" json:"xhttp_mode,omitempty"`    // auto|packet-up|stream-up|stream-one
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3009,6 +3052,27 @@ func (x *InboundAddRequest) GetPort() int32 {
 	return 0
 }
 
+func (x *InboundAddRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *InboundAddRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *InboundAddRequest) GetXhttpMode() string {
+	if x != nil {
+		return x.XhttpMode
+	}
+	return ""
+}
+
 type InboundInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -3022,6 +3086,11 @@ type InboundInfo struct {
 	PublicHost    string                 `protobuf:"bytes,9,opt,name=public_host,json=publicHost,proto3" json:"public_host,omitempty"`
 	ShareLink     string                 `protobuf:"bytes,10,opt,name=share_link,json=shareLink,proto3" json:"share_link,omitempty"`
 	TgLink        string                 `protobuf:"bytes,11,opt,name=tg_link,json=tgLink,proto3" json:"tg_link,omitempty"` // tg://socks deeplink (socks inbounds only; else empty)
+	Network       string                 `protobuf:"bytes,12,opt,name=network,proto3" json:"network,omitempty"`
+	Path          string                 `protobuf:"bytes,13,opt,name=path,proto3" json:"path,omitempty"`
+	Listen        string                 `protobuf:"bytes,14,opt,name=listen,proto3" json:"listen,omitempty"`
+	Email         string                 `protobuf:"bytes,15,opt,name=email,proto3" json:"email,omitempty"`
+	XhttpMode     string                 `protobuf:"bytes,16,opt,name=xhttp_mode,json=xhttpMode,proto3" json:"xhttp_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3129,6 +3198,41 @@ func (x *InboundInfo) GetShareLink() string {
 func (x *InboundInfo) GetTgLink() string {
 	if x != nil {
 		return x.TgLink
+	}
+	return ""
+}
+
+func (x *InboundInfo) GetNetwork() string {
+	if x != nil {
+		return x.Network
+	}
+	return ""
+}
+
+func (x *InboundInfo) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *InboundInfo) GetListen() string {
+	if x != nil {
+		return x.Listen
+	}
+	return ""
+}
+
+func (x *InboundInfo) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *InboundInfo) GetXhttpMode() string {
+	if x != nil {
+		return x.XhttpMode
 	}
 	return ""
 }
@@ -3629,13 +3733,20 @@ const file_emx_proto_rawDesc = "" +
 	"uptime_sec\x18\x02 \x01(\x03R\tuptimeSec\x12%\n" +
 	"\x04xray\x18\x03 \x01(\v2\x11.emx.v1.XrayStateR\x04xray\x12%\n" +
 	"\x0elatest_version\x18\x04 \x01(\tR\rlatestVersion\x12)\n" +
-	"\x10update_available\x18\x05 \x01(\bR\x0fupdateAvailable\"r\n" +
+	"\x10update_available\x18\x05 \x01(\bR\x0fupdateAvailable\"\xb5\x02\n" +
 	"\tXrayState\x12\x18\n" +
 	"\arunning\x18\x01 \x01(\bR\arunning\x12\x10\n" +
 	"\x03pid\x18\x02 \x01(\x05R\x03pid\x12\x1a\n" +
 	"\brestarts\x18\x03 \x01(\x05R\brestarts\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\x04 \x01(\tR\tlastError\"\x11\n" +
+	"last_error\x18\x04 \x01(\tR\tlastError\x12%\n" +
+	"\x0ehealth_checked\x18\x05 \x01(\bR\rhealthChecked\x12\x1e\n" +
+	"\n" +
+	"responsive\x18\x06 \x01(\bR\n" +
+	"responsive\x12%\n" +
+	"\x0ehealth_message\x18\a \x01(\tR\rhealthMessage\x12'\n" +
+	"\x0fhealth_restarts\x18\b \x01(\x05R\x0ehealthRestarts\x12*\n" +
+	"\x11last_health_check\x18\t \x01(\x03R\x0flastHealthCheck\"\x11\n" +
 	"\x0fShutdownRequest\"\x0f\n" +
 	"\rShutdownReply\"#\n" +
 	"\x0fLogLevelRequest\x12\x10\n" +
@@ -3676,14 +3787,18 @@ const file_emx_proto_rawDesc = "" +
 	"EntryReply\x12'\n" +
 	"\x05entry\x18\x01 \x01(\v2\x11.emx.v1.EntryInfoR\x05entry\"=\n" +
 	"\x0eEntryListReply\x12+\n" +
-	"\aentries\x18\x01 \x03(\v2\x11.emx.v1.EntryInfoR\aentries\"\x90\x01\n" +
+	"\aentries\x18\x01 \x03(\v2\x11.emx.v1.EntryInfoR\aentries\"\xd9\x01\n" +
 	"\x11InboundAddRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x16\n" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x12\x1f\n" +
 	"\vpublic_host\x18\x04 \x01(\tR\n" +
 	"publicHost\x12\x12\n" +
-	"\x04port\x18\x05 \x01(\x05R\x04port\"\x9c\x02\n" +
+	"\x04port\x18\x05 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04path\x18\x06 \x01(\tR\x04path\x12\x14\n" +
+	"\x05email\x18\a \x01(\tR\x05email\x12\x1d\n" +
+	"\n" +
+	"xhttp_mode\x18\b \x01(\tR\txhttpMode\"\x97\x03\n" +
 	"\vInboundInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -3698,7 +3813,13 @@ const file_emx_proto_rawDesc = "" +
 	"\n" +
 	"share_link\x18\n" +
 	" \x01(\tR\tshareLink\x12\x17\n" +
-	"\atg_link\x18\v \x01(\tR\x06tgLink\"=\n" +
+	"\atg_link\x18\v \x01(\tR\x06tgLink\x12\x18\n" +
+	"\anetwork\x18\f \x01(\tR\anetwork\x12\x12\n" +
+	"\x04path\x18\r \x01(\tR\x04path\x12\x16\n" +
+	"\x06listen\x18\x0e \x01(\tR\x06listen\x12\x14\n" +
+	"\x05email\x18\x0f \x01(\tR\x05email\x12\x1d\n" +
+	"\n" +
+	"xhttp_mode\x18\x10 \x01(\tR\txhttpMode\"=\n" +
 	"\fInboundReply\x12-\n" +
 	"\ainbound\x18\x01 \x01(\v2\x13.emx.v1.InboundInfoR\ainbound\"C\n" +
 	"\x10InboundListReply\x12/\n" +

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -24,12 +25,24 @@ type Supervisor struct {
 	log   *log.Logger
 	wd    *Watchdog
 
-	mu sync.Mutex
+	mu              sync.Mutex
+	healthMu        sync.Mutex
+	healthChecked   bool
+	healthOK        bool
+	healthFailures  int
+	healthRestarts  int32
+	healthMessage   string
+	healthCheckedAt time.Time
 	// loadedSlots is what xray currently has live per master: slot index + the
 	// set of member keys. Set to the baked slots on Reconcile; advanced
 	// incrementally by SyncDialerMembers as it applies deltas.
 	loadedSlots map[string]loadedSlot
 }
+
+const (
+	xrayHealthInterval     = 30 * time.Second
+	xrayHealthFailureLimit = 3
+)
 
 // loadedSlot tracks a master's live slot: its index and current member keys.
 type loadedSlot struct {
@@ -192,6 +205,12 @@ func (s *Supervisor) Stop() { s.wd.Stop(5 * time.Second) }
 func (s *Supervisor) RestartXray() (bool, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.healthMu.Lock()
+	s.healthChecked = false
+	s.healthOK = false
+	s.healthFailures = 0
+	s.healthMessage = "waiting for replacement xray health check"
+	s.healthMu.Unlock()
 	// Full stop first so a hung child is signalled (and killed after the grace
 	// period) rather than merely asked to reload.
 	s.wd.Stop(5 * time.Second)
@@ -222,6 +241,75 @@ func (s *Supervisor) RestartXray() (bool, int, error) {
 // XrayState exposes child health for the Status RPC.
 func (s *Supervisor) XrayState() (running bool, pid int, restarts int32, lastErr string) {
 	return s.wd.State()
+}
+
+// StartHealthMonitor probes xray's local API. A live-but-wedged process is
+// force-restarted after three consecutive failed checks; ordinary process
+// exits remain the watchdog's responsibility.
+func (s *Supervisor) StartHealthMonitor(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(xrayHealthInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.checkXrayHealth()
+			}
+		}
+	}()
+}
+
+func (s *Supervisor) checkXrayHealth() {
+	running, _, _, _ := s.wd.State()
+	if !running {
+		return
+	}
+	_, err := s.StatsQuery()
+	if !s.recordHealthResult(err) {
+		return
+	}
+	s.log.Printf("xray health check failed %d times — restarting", xrayHealthFailureLimit)
+	_, _, restartErr := s.RestartXray()
+	s.healthMu.Lock()
+	s.healthFailures = 0
+	s.healthRestarts++
+	if restartErr != nil {
+		s.healthOK = false
+		s.healthMessage = "health restart failed: " + restartErr.Error()
+	} else {
+		s.healthChecked = false // the replacement child has not been probed yet
+		s.healthOK = false
+		s.healthMessage = "restarted after failed health checks"
+	}
+	s.healthMu.Unlock()
+}
+
+// recordHealthResult updates the health snapshot and reports whether the
+// failure threshold was reached.
+func (s *Supervisor) recordHealthResult(err error) bool {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	s.healthChecked = true
+	s.healthCheckedAt = time.Now()
+	if err == nil {
+		s.healthOK = true
+		s.healthFailures = 0
+		s.healthMessage = "ok"
+		return false
+	}
+	s.healthOK = false
+	s.healthFailures++
+	s.healthMessage = fmt.Sprintf("API check failed (%d/%d): %v", s.healthFailures, xrayHealthFailureLimit, err)
+	return s.healthFailures >= xrayHealthFailureLimit
+}
+
+// XrayHealth snapshots the responsiveness monitor for status output.
+func (s *Supervisor) XrayHealth() (checked, responsive bool, message string, restarts int32, checkedAt time.Time) {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	return s.healthChecked, s.healthOK, s.healthMessage, s.healthRestarts, s.healthCheckedAt
 }
 
 // resolveDialerSlots resolves each enabled master's Dialer refs into concrete
@@ -295,10 +383,10 @@ func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, 
 }
 
 // routable reports whether xray has anything to serve: any enabled inbound with
-// a listen port.
+// a TCP port or Unix socket.
 func routable(inbounds []xray.Inbound) bool {
 	for _, in := range inbounds {
-		if in.Enabled && in.Port != 0 {
+		if in.Enabled && (in.Port != 0 || xray.IsUnixInbound(in)) {
 			return true
 		}
 	}

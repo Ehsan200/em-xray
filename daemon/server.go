@@ -57,15 +57,25 @@ func (s *Server) Ping(context.Context, *emxv1.PingRequest) (*emxv1.PingReply, er
 
 func (s *Server) Status(context.Context, *emxv1.StatusRequest) (*emxv1.StatusReply, error) {
 	running, pid, restarts, lastErr := s.sup.XrayState()
+	healthChecked, responsive, healthMessage, healthRestarts, checkedAt := s.sup.XrayHealth()
+	var checkedUnix int64
+	if !checkedAt.IsZero() {
+		checkedUnix = checkedAt.Unix()
+	}
 	latest := s.latest()
 	return &emxv1.StatusReply{
 		DaemonPid: int32(os.Getpid()),
 		UptimeSec: int64(time.Since(s.startTime).Seconds()),
 		Xray: &emxv1.XrayState{
-			Running:   running,
-			Pid:       int32(pid),
-			Restarts:  restarts,
-			LastError: lastErr,
+			Running:         running,
+			Pid:             int32(pid),
+			Restarts:        restarts,
+			LastError:       lastErr,
+			HealthChecked:   healthChecked,
+			Responsive:      responsive,
+			HealthMessage:   healthMessage,
+			HealthRestarts:  healthRestarts,
+			LastHealthCheck: checkedUnix,
 		},
 		LatestVersion:   latest,
 		UpdateAvailable: latest != "" && selfupdate.Newer(buildVersion, latest),

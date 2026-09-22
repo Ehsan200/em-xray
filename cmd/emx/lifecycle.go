@@ -183,12 +183,27 @@ func statusCmd() *cobra.Command {
 			x := st.Xray
 			if x != nil && x.Running {
 				fmt.Fprintf(out, "xray:    running (pid %d, restarts %d)\n", x.Pid, x.Restarts)
+				switch {
+				case !x.HealthChecked:
+					fmt.Fprintln(out, "health:  waiting for first responsiveness check")
+				case x.Responsive:
+					fmt.Fprintf(out, "health:  responsive (automatic health restarts %d)\n", x.HealthRestarts)
+				default:
+					fmt.Fprintf(out, "health:  degraded — %s\n", x.HealthMessage)
+				}
 			} else {
 				le := ""
 				if x != nil && x.LastError != "" {
 					le = " — " + x.LastError
 				}
 				fmt.Fprintf(out, "xray:    stopped%s\n", le)
+			}
+			if _, err := exec.LookPath("caddy"); err == nil {
+				active := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "caddy").Run() == nil
+				enabled := exec.CommandContext(ctx, "systemctl", "is-enabled", "--quiet", "caddy").Run() == nil
+				fmt.Fprintf(out, "caddy:   installed (active=%v, enabled=%v)\n", active, enabled)
+			} else {
+				fmt.Fprintln(out, "caddy:   not installed")
 			}
 			if st.UpdateAvailable {
 				fmt.Fprintf(out, "update:  %s available (run `emx update`)\n", st.LatestVersion)

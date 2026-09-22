@@ -254,6 +254,11 @@ message XrayState {
   int32 pid = 2;
   int32 restarts = 3;
   string last_error = 4;
+  bool health_checked = 5;
+  bool responsive = 6;
+  string health_message = 7;
+  int32 health_restarts = 8;
+  int64 last_health_check = 9;
 }
 
 message ShutdownRequest {}
@@ -313,7 +318,10 @@ message InboundAddRequest {
   string template = 2;    // "" => default (vless-reality)
   string target = 3;      // master:NAME | xray:NAME | direct
   string public_host = 4; // address clients dial (for the share link)
-  int32 port = 5;         // 0 => auto-assign
+  int32 port = 5;         // 0 => auto-assign (or no TCP port for Unix sockets)
+  string path = 6;        // transport path; blank => template default/random
+  string email = 7;       // primary client's stats identity
+  string xhttp_mode = 8;  // auto|packet-up|stream-up|stream-one
 }
 message InboundInfo {
   uint32 id = 1;
@@ -327,6 +335,11 @@ message InboundInfo {
   string public_host = 9;
   string share_link = 10;
   string tg_link = 11; // tg://socks deeplink (socks inbounds only; else empty)
+  string network = 12;
+  string path = 13;
+  string listen = 14;
+  string email = 15;
+  string xhttp_mode = 16;
 }
 message InboundReply { InboundInfo inbound = 1; }
 message InboundListReply { repeated InboundInfo inbounds = 1; }

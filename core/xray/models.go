@@ -20,13 +20,13 @@ const (
 // Subscription is a remote URL that yields a volatile pool of nodes. It is never
 // itself a routing target — its nodes are consumed only inside a master's Dialer.
 type Subscription struct {
-	ID          uint      `gorm:"primaryKey"`
-	Name        string    `gorm:"uniqueIndex;not null"`
-	URL         string    `gorm:"not null"`
-	UserAgent   string    // many providers gate on a v2rayN-ish UA
-	IntervalSec int       // refresh cadence; 0 => default
-	NodeCap     int       // max active nodes; 0 => default
-	Enabled     bool      `gorm:"default:true"`
+	ID          uint   `gorm:"primaryKey"`
+	Name        string `gorm:"uniqueIndex;not null"`
+	URL         string `gorm:"not null"`
+	UserAgent   string // many providers gate on a v2rayN-ish UA
+	IntervalSec int    // refresh cadence; 0 => default
+	NodeCap     int    // max active nodes; 0 => default
+	Enabled     bool   `gorm:"default:true"`
 	LastFetched time.Time
 	LastError   string
 
@@ -61,8 +61,8 @@ func (s Subscription) EffectiveCap() int {
 // subscription is replaced on every fetch (ReplaceNodes). Identity is the
 // content Fingerprint, not the row id or display name.
 type SubNode struct {
-	ID            uint   `gorm:"primaryKey"` // ascending => insertion order
-	SubID         uint   `gorm:"index;not null"`
+	ID            uint `gorm:"primaryKey"` // ascending => insertion order
+	SubID         uint `gorm:"index;not null"`
 	Name          string
 	Fingerprint   string `gorm:"index;not null"` // sha256(outbound sans tag), 16 hex
 	Outbound      string `gorm:"not null"`       // raw outbound JSON
@@ -108,7 +108,7 @@ type Inbound struct {
 	Name     string `gorm:"uniqueIndex;not null"`
 	Protocol string `gorm:"not null"` // vless|vmess|socks|trojan|hysteria
 	Listen   string // default per protocol (0.0.0.0 for servers, 127.0.0.1 for socks)
-	Port     int    // 0 => auto-assign from [PortStart,PortEnd]
+	Port     int    // 0 => auto-assign, except Unix-socket listeners (no TCP port)
 	Enabled  bool   `gorm:"default:true"`
 
 	// Credential (auto-generated): UUID for vless/vmess, Password for trojan,
@@ -121,10 +121,12 @@ type Inbound struct {
 	Flow         string // vless flow, e.g. xtls-rprx-vision
 
 	// Transport + security.
-	Network  string // tcp|ws|grpc|xhttp (default tcp)
-	Path     string // ws/xhttp path
-	Host     string // ws Host header / xhttp host
-	Security string // reality|tls|none
+	Network     string // tcp|ws|grpc|xhttp (default tcp)
+	Path        string // ws/xhttp path
+	Host        string // ws Host header / xhttp host
+	Security    string // reality|tls|none
+	XHTTPMode   string // auto|packet-up|stream-up|stream-one (xhttp only)
+	ClientEmail string // primary client's xray stats identity; blank => inbound name
 
 	// Reality params (auto-generated when Security=reality).
 	RealityPrivateKey string

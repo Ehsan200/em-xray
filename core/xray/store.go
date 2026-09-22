@@ -383,7 +383,7 @@ func (s *Store) CreateInbound(in *Inbound) error {
 	if _, _, err := ParseTarget(in.Target); err != nil {
 		return err
 	}
-	if in.Port == 0 {
+	if in.Port == 0 && !IsUnixInbound(*in) {
 		if err := s.assignInboundPort(in); err != nil {
 			return err
 		}
@@ -438,8 +438,8 @@ func (s *Store) SetInboundEnabled(id uint, enabled bool) error {
 }
 
 // DuplicateInbound clones an inbound under newName with FRESH credentials
-// (uuid/password/reality keys/tls cert) and a newly-assigned port, so the copy
-// is an independent server sharing only the source's shape (protocol/transport/
+// (uuid/password/reality keys/tls cert) and endpoint, so the copy is an
+// independent server sharing only the source's shape (protocol/transport/
 // security/target). PublicHost is carried over.
 func (s *Store) DuplicateInbound(id uint, newName string) (*Inbound, error) {
 	src, err := s.GetInbound(id)
@@ -454,6 +454,16 @@ func (s *Store) DuplicateInbound(id uint, newName string) (*Inbound, error) {
 	dup.Password = ""
 	dup.RealityPrivateKey, dup.RealityPublicKey, dup.RealityShortID = "", "", ""
 	dup.TLSCert, dup.TLSKey = "", ""
+	if IsCaddyXHTTP(*src) {
+		dup.Listen = CaddySocketListen(dup.Name)
+		dup.Path = ""
+		path, err := NewXHTTPPath()
+		if err != nil {
+			return nil, err
+		}
+		dup.Path = path
+		dup.ClientEmail = sanitizeKey(dup.Name) + "@xhttp.local"
+	}
 	dup.CreatedAt, dup.UpdatedAt = time.Time{}, time.Time{}
 	if err := Materialize(&dup); err != nil {
 		return nil, err

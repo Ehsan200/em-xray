@@ -80,7 +80,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	inboundsJSON := []any{}
 	var rules []any
 	for _, in := range ins {
-		if !in.Enabled || in.Port == 0 {
+		if !in.Enabled || (in.Port == 0 && !IsUnixInbound(in)) {
 			continue
 		}
 		ib, err := buildInbound(in)
@@ -240,8 +240,10 @@ func buildInbound(in Inbound) (map[string]any, error) {
 	ib := map[string]any{
 		"tag":      tag,
 		"listen":   listen,
-		"port":     in.Port,
 		"protocol": in.Protocol,
+	}
+	if !IsUnixInbound(in) {
+		ib["port"] = in.Port
 	}
 
 	switch in.Protocol {
@@ -284,7 +286,11 @@ func buildInbound(in Inbound) (map[string]any, error) {
 // user in in.Users. Each client carries a stats email (level 0) so xray reports
 // per-user byte counters. The daemon has already dropped over-quota users.
 func inboundClients(in Inbound) []any {
-	clients := []any{clientObject(in.Protocol, in.UUID, in.Password, PrimaryUserEmail(in.Name), in.Flow)}
+	email := in.ClientEmail
+	if email == "" {
+		email = PrimaryUserEmail(in.Name)
+	}
+	clients := []any{clientObject(in.Protocol, in.UUID, in.Password, email, in.Flow)}
 	for _, u := range in.Users {
 		clients = append(clients, clientObject(in.Protocol, u.UUID, u.Password, u.Email, in.Flow))
 	}
@@ -379,7 +385,7 @@ func buildInboundStream(in Inbound) (map[string]any, error) {
 		}
 		ss["httpupgradeSettings"] = hu
 	case "xhttp":
-		x := map[string]any{"path": orDefault(in.Path, "/"), "mode": "auto"}
+		x := map[string]any{"path": orDefault(in.Path, "/"), "mode": orDefault(in.XHTTPMode, "auto")}
 		if in.Host != "" {
 			x["host"] = in.Host
 		}

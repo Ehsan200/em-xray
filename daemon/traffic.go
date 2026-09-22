@@ -132,7 +132,11 @@ func buildTagIndex(store *xray.Store) tagIndex {
 	if ins, err := store.ListInbounds(); err == nil {
 		for _, in := range ins {
 			idx.in[xray.InboundTag(in.Name)] = in.Name
-			idx.user[xray.PrimaryUserEmail(in.Name)] = in.Name // primary client email
+			email := in.ClientEmail
+			if email == "" {
+				email = xray.PrimaryUserEmail(in.Name)
+			}
+			idx.user[email] = in.Name // primary client email
 			if us, err := store.InboundUsers(in.ID); err == nil {
 				for _, u := range us {
 					idx.user[u.Email] = in.Name + "/" + u.Name

@@ -55,6 +55,7 @@ func rootCmd() *cobra.Command {
 		probeIntervalCmd(),
 		updateCmd(),
 		systemdCmd(),
+		caddyCmd(),
 		uiCmd(),
 	)
 	return root

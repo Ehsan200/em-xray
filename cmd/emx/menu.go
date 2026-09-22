@@ -50,6 +50,8 @@ func runMenu(cmd *cobra.Command, section string) error {
 		s.subsMenu()
 	case "entry":
 		s.entriesMenu()
+	case "caddy":
+		s.caddyMenu()
 	}
 	return nil
 }
@@ -62,11 +64,12 @@ func (s *menuSession) mainMenu() {
 			{"Entries", "outbounds & masters"},
 			{"Traffic", "per-inbound/outbound usage + charts"},
 			{"Templates", "view built-in inbound presets"},
+			{"Caddy", "HTTPS frontend for XHTTP domains"},
 			{"Status", "daemon & xray health"},
 			{"Restart", "cycle xray or the whole daemon"},
 			{"Quit", ""},
 		})
-		if !ok || i == 7 {
+		if !ok || i == 8 {
 			return
 		}
 		switch i {
@@ -81,8 +84,10 @@ func (s *menuSession) mainMenu() {
 		case 4:
 			s.templatesView()
 		case 5:
-			s.statusView()
+			s.caddyMenu()
 		case 6:
+			s.statusView()
+		case 7:
 			if s.restartMenu() {
 				return // the daemon was restarted — this connection is dead
 			}
@@ -139,9 +144,13 @@ func (s *menuSession) inboundsMenu() {
 		}
 		items := make([]selectItem, 0, len(reply.Inbounds)+2)
 		for _, in := range reply.Inbounds {
+			endpoint := fmt.Sprintf(":%d", in.Port)
+			if in.Port == 0 && in.Listen != "" {
+				endpoint = in.Listen
+			}
 			items = append(items, selectItem{
 				label: in.Name,
-				desc:  fmt.Sprintf("%s :%d → %s", in.Protocol, in.Port, in.Target),
+				desc:  fmt.Sprintf("%s %s → %s", in.Protocol, endpoint, in.Target),
 			})
 		}
 		items = append(items, selectItem{label: "+ Add inbound"}, selectItem{label: "← Back"})
@@ -160,7 +169,11 @@ func (s *menuSession) inboundsMenu() {
 
 func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 	for {
-		title := fmt.Sprintf("Inbound: %s (%s :%d → %s)", in.Name, in.Protocol, in.Port, in.Target)
+		endpoint := fmt.Sprintf(":%d", in.Port)
+		if in.Port == 0 && in.Listen != "" {
+			endpoint = in.Listen
+		}
+		title := fmt.Sprintf("Inbound: %s (%s %s → %s)", in.Name, in.Protocol, endpoint, in.Target)
 		i, ok := runSelect(title, []selectItem{
 			{"Show client link", ""},
 			{"Show QR code", ""},
@@ -199,9 +212,14 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 				notify("error: %v", err)
 			} else {
 				notify("duplicated to %s (:%d)", reply.Inbound.Name, reply.Inbound.Port)
+				if isCaddyInboundInfo(reply.Inbound) {
+					if err := maybeApplyCaddy(s.cmd); err != nil {
+						notify("Caddy apply failed: %v", err)
+					}
+				}
 			}
 		case 4:
-			s.editConfig("inbound", in.Id)
+			s.editConfig("inbound", in.Id, isCaddyInboundInfo(in))
 		case 5:
 			if confirm("Remove inbound " + in.Name + "?") {
 				ctx, cancel := call()
@@ -211,6 +229,11 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 					notify("error: %v", err)
 				} else {
 					notify("removed %s", in.Name)
+					if isCaddyInboundInfo(in) {
+						if err := maybeApplyCaddy(s.cmd); err != nil {
+							notify("Caddy apply failed: %v", err)
+						}
+					}
 					return
 				}
 			}
@@ -363,11 +386,26 @@ func (s *menuSession) inboundAdd() {
 	if target == "" {
 		return
 	}
-	host, _ := runInput("Public host/IP for the link (blank = auto-detect)", "")
+	hostPrompt := "Public host/IP for the link (blank = auto-detect)"
+	if template == "vless-caddy-xhttp" {
+		hostPrompt = "Domain (for example x.example.com)"
+	}
+	host, _ := runInput(hostPrompt, "")
+	path, email, mode := "", "", ""
+	if template == "vless-caddy-xhttp" {
+		if host == "" {
+			notify("domain is required for the Caddy/XHTTP template")
+			return
+		}
+		path, _ = runInput("XHTTP path (blank = random)", "")
+		email, _ = runInput("Primary client email (blank = generated)", "")
+		mode, _ = runInput("XHTTP mode", "packet-up")
+	}
 
 	ctx, cancel = call()
 	reply, err := s.c.InboundAdd(ctx, &emxv1.InboundAddRequest{
 		Name: name, Template: template, Target: target, PublicHost: host,
+		Path: path, Email: email, XhttpMode: mode,
 	})
 	cancel()
 	if err != nil {
@@ -378,6 +416,55 @@ func (s *menuSession) inboundAdd() {
 	notify("added %s: %s on :%d → %s", in.Name, in.Protocol, in.Port, in.Target)
 	if in.ShareLink != "" {
 		fmt.Println("\nclient link:\n  " + in.ShareLink + "\n")
+	}
+	if isCaddyInboundInfo(in) {
+		if err := maybeApplyCaddy(s.cmd); err != nil {
+			notify("Caddy apply failed: %v", err)
+		}
+	}
+}
+
+// ---- Caddy ----------------------------------------------------------------
+
+func (s *menuSession) caddyMenu() {
+	for {
+		i, ok := runSelect("Caddy", []selectItem{
+			{"Status", "installation and systemd state"},
+			{"Domains", "domains routed to Caddy/XHTTP inbounds"},
+			{"View generated Caddyfile", "preview without changing the server"},
+			{"Apply configuration", "validate and reload Caddy"},
+			{"Install Caddy", "official Debian/Ubuntu package; needs root"},
+			{"Enable Caddy", "enable and start the system service; needs root"},
+			{"Disable Caddy", "stop and disable the system service; needs root"},
+			{"← Back", ""},
+		})
+		if !ok || i == 7 {
+			return
+		}
+		var action *cobra.Command
+		switch i {
+		case 0:
+			action = caddyStatusCmd()
+		case 1:
+			action = caddyDomainsCmd()
+		case 2:
+			action = caddyPrintCmd()
+		case 3:
+			action = caddyApplyCmd()
+		case 4:
+			action = caddyInstallCmd()
+		case 5:
+			action = caddyEnableCmd()
+		case 6:
+			action = caddyDisableCmd()
+		}
+		if action != nil {
+			action.SetOut(s.cmd.OutOrStdout())
+			action.SetErr(s.cmd.ErrOrStderr())
+			if err := action.RunE(action, nil); err != nil {
+				notify("error: %v", err)
+			}
+		}
 	}
 }
 
@@ -766,7 +853,7 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 			notify("duplicated to %s", reply.Entry.Name)
 		}
 	case 3:
-		s.editConfig("entry", e.Id)
+		s.editConfig("entry", e.Id, false)
 	case 4:
 		if confirm("Remove entry " + e.Name + "?") {
 			ctx, cancel := call()
@@ -783,7 +870,7 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 
 // editConfig opens the given config (kind "inbound" or "entry") in $EDITOR and
 // saves the result. It drops out of the TUI while the editor runs.
-func (s *menuSession) editConfig(kind string, id uint32) {
+func (s *menuSession) editConfig(kind string, id uint32, caddyManaged bool) {
 	ctx, cancel := call()
 	var cur *emxv1.ConfigReply
 	var err error
@@ -807,8 +894,13 @@ func (s *menuSession) editConfig(kind string, id uint32) {
 		return
 	}
 	ctx, cancel = call()
+	var savedInbound *emxv1.InboundInfo
 	if kind == "inbound" {
-		_, err = s.c.InboundSetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
+		var reply *emxv1.InboundReply
+		reply, err = s.c.InboundSetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
+		if reply != nil {
+			savedInbound = reply.Inbound
+		}
 	} else {
 		_, err = s.c.EntrySetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
 	}
@@ -817,6 +909,11 @@ func (s *menuSession) editConfig(kind string, id uint32) {
 		notify("error: %v", err)
 	} else {
 		notify("saved")
+		if caddyManaged || isCaddyInboundInfo(savedInbound) {
+			if err := maybeApplyCaddy(s.cmd); err != nil {
+				notify("Caddy apply failed: %v", err)
+			}
+		}
 	}
 }
 
@@ -933,7 +1030,13 @@ func (s *menuSession) statusView() {
 	}
 	xray := "stopped"
 	if st.Xray != nil && st.Xray.Running {
-		xray = fmt.Sprintf("running (pid %d, restarts %d)", st.Xray.Pid, st.Xray.Restarts)
+		health := "health pending"
+		if st.Xray.HealthChecked && st.Xray.Responsive {
+			health = "responsive"
+		} else if st.Xray.HealthChecked {
+			health = "degraded"
+		}
+		xray = fmt.Sprintf("running (pid %d, restarts %d, %s)", st.Xray.Pid, st.Xray.Restarts, health)
 	}
 	items := []selectItem{}
 	// Current fastest node per master, if any.

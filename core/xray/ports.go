@@ -24,9 +24,9 @@ const (
 // `xray api` call read this same value, so they stay consistent per process.
 var ApiPort = DefaultApiPort
 
-// AssignInboundPorts allocates a stable listen port to every enabled inbound
+// AssignInboundPorts allocates a stable listen port to every enabled TCP inbound
 // that lacks one (Port==0), choosing the lowest free port in [PortStart,PortEnd]
-// not already taken by another inbound. Inbounds with an explicit Port keep it.
+// not already taken by another inbound. Unix-socket inbounds keep Port at zero.
 // It mutates inbounds in place and returns the indices whose Port changed.
 func AssignInboundPorts(inbounds []Inbound) []int {
 	used := make(map[int]bool)
@@ -37,7 +37,7 @@ func AssignInboundPorts(inbounds []Inbound) []int {
 	}
 	var changed []int
 	for i := range inbounds {
-		if !inbounds[i].Enabled || inbounds[i].Port != 0 {
+		if !inbounds[i].Enabled || inbounds[i].Port != 0 || IsUnixInbound(inbounds[i]) {
 			continue
 		}
 		p := nextFreePort(used)

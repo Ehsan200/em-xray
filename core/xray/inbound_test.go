@@ -25,6 +25,38 @@ func TestNewInboundFromTemplateReality(t *testing.T) {
 	}
 }
 
+func TestCaddyXHTTPTemplate(t *testing.T) {
+	in, err := NewInboundFromTemplate("edge", "vless-caddy-xhttp", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsCaddyXHTTP(*in) || in.Port != 0 {
+		t.Fatalf("not a socket-backed Caddy inbound: %+v", in)
+	}
+	if in.XHTTPMode != "packet-up" || !strings.HasPrefix(in.Path, "/") || !strings.HasSuffix(in.Path, "/") {
+		t.Fatalf("bad XHTTP defaults: path=%q mode=%q", in.Path, in.XHTTPMode)
+	}
+	if in.ClientEmail != "edge@xhttp.local" {
+		t.Fatalf("email = %q", in.ClientEmail)
+	}
+	link := ShareLink(*in, "x.example.com")
+	for _, want := range []string{"@x.example.com:443", "security=tls", "sni=x.example.com", "type=xhttp", "mode=packet-up"} {
+		if !strings.Contains(link, want) {
+			t.Errorf("link missing %q: %s", want, link)
+		}
+	}
+}
+
+func TestMaterializeNormalizesCaddyPath(t *testing.T) {
+	in := &Inbound{Name: "edge", Protocol: "vless", Network: "xhttp", Security: "none", Listen: "/tmp/edge.sock,0666", Path: "api", XHTTPMode: "packet-up"}
+	if err := Materialize(in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Path != "/api/" {
+		t.Fatalf("path = %q, want /api/", in.Path)
+	}
+}
+
 func TestMaterializeIdempotent(t *testing.T) {
 	in := &Inbound{Name: "x", Protocol: "vless", Security: "reality", UUID: "keep-me"}
 	if err := Materialize(in); err != nil {

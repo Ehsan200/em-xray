@@ -98,6 +98,9 @@ func Run(ctx context.Context) error {
 
 	// Sample xray per-tag byte counters into hourly buckets for the traffic view.
 	NewTrafficSampler(store, sup, logger).Start(ctx)
+	// A process can remain alive while its API/event loop is wedged. Probe it
+	// independently of the crash watchdog and restart after repeated failures.
+	sup.StartHealthMonitor(ctx)
 	// Keep xray's logs from filling the disk (rolls past the configured cap).
 	NewLogRotator(store, p, logger).Start(ctx)
 

@@ -27,7 +27,7 @@ func inboundCmd() *cobra.Command {
 
 func inboundDuplicateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "duplicate <id> [new-name]", Short: "clone an inbound (fresh keys + port)",
+		Use: "duplicate <id> [new-name]", Short: "clone an inbound (fresh keys + endpoint)",
 		Aliases: []string{"dup", "copy"}, Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0])
@@ -44,6 +44,9 @@ func inboundDuplicateCmd() *cobra.Command {
 					return err
 				}
 				printInbound(cmd.OutOrStdout(), reply.Inbound, true)
+				if isCaddyInboundInfo(reply.Inbound) {
+					return maybeApplyCaddy(cmd)
+				}
 				return nil
 			})
 		},
@@ -72,11 +75,15 @@ func inboundEditCmd() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), "no changes")
 					return nil
 				}
+				wasCaddy := isCaddyInboundJSON(cur.Json)
 				reply, err := cl.InboundSetConfig(ctx, &emxv1.SetConfigRequest{Id: id, Json: edited})
 				if err != nil {
 					return err
 				}
 				printInboundVerb(cmd.OutOrStdout(), "updated", reply.Inbound, true)
+				if wasCaddy || isCaddyInboundInfo(reply.Inbound) {
+					return maybeApplyCaddy(cmd)
+				}
 				return nil
 			})
 		},
@@ -84,7 +91,7 @@ func inboundEditCmd() *cobra.Command {
 }
 
 func inboundAddCmd() *cobra.Command {
-	var template, target, host string
+	var template, target, host, domain, path, email, xhttpMode string
 	var port int
 	c := &cobra.Command{
 		Use:   "add [name]",
@@ -113,6 +120,12 @@ func inboundAddCmd() *cobra.Command {
 			if target == "" {
 				target = "direct"
 			}
+			if domain != "" {
+				if host != "" && host != domain {
+					return fmt.Errorf("--host and --domain disagree")
+				}
+				host = domain
+			}
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
 			defer cancel()
@@ -123,18 +136,26 @@ func inboundAddCmd() *cobra.Command {
 			defer conn.Close()
 			reply, err := client.InboundAdd(ctx, &emxv1.InboundAddRequest{
 				Name: name, Template: template, Target: target, PublicHost: host, Port: int32(port),
+				Path: path, Email: email, XhttpMode: xhttpMode,
 			})
 			if err != nil {
 				return err
 			}
 			printInbound(cmd.OutOrStdout(), reply.Inbound, true)
+			if isCaddyInboundInfo(reply.Inbound) {
+				return maybeApplyCaddy(cmd)
+			}
 			return nil
 		},
 	}
-	c.Flags().StringVarP(&template, "template", "t", "", "template (default vless-reality; see `emx template ls`)")
+	c.Flags().StringVarP(&template, "template", "t", "", "template name (default vless-reality; see: emx template ls)")
 	c.Flags().StringVar(&target, "to", "", "egress target: master:NAME | xray:NAME | direct")
 	c.Flags().StringVar(&host, "host", "", "public host/IP clients dial (for the share link)")
+	c.Flags().StringVar(&domain, "domain", "", "public domain for Caddy and the client link")
 	c.Flags().IntVar(&port, "port", 0, "listen port (0 = auto-assign)")
+	c.Flags().StringVar(&path, "path", "", "transport path (Caddy/XHTTP: blank generates a random path)")
+	c.Flags().StringVar(&email, "email", "", "primary client's xray stats email")
+	c.Flags().StringVar(&xhttpMode, "xhttp-mode", "", "XHTTP mode: auto | packet-up | stream-up | stream-one")
 	return c
 }
 
@@ -158,7 +179,7 @@ func inboundListCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tNAME\tPROTO\tPORT\tSECURITY\tTARGET\tENABLED")
+			fmt.Fprintln(tw, "ID\tNAME\tPROTO\tENDPOINT\tSECURITY\tTARGET\tENABLED")
 			direct := 0
 			for _, in := range reply.Inbounds {
 				// A direct target is the one egress that reveals this server's own
@@ -170,7 +191,11 @@ func inboundListCmd() *cobra.Command {
 						direct++
 					}
 				}
-				fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\t%s\t%v\n", in.Id, in.Name, in.Protocol, in.Port, in.Security, target, in.Enabled)
+				endpoint := fmt.Sprintf(":%d", in.Port)
+				if in.Listen != "" && in.Port == 0 {
+					endpoint = in.Listen
+				}
+				fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%v\n", in.Id, in.Name, in.Protocol, endpoint, in.Security, target, in.Enabled)
 			}
 			tw.Flush()
 			if direct > 0 {
@@ -216,10 +241,22 @@ func inboundRemoveCmd() *cobra.Command {
 				return errDaemon(err)
 			}
 			defer conn.Close()
+			managed := false
+			if list, listErr := client.InboundList(ctx, &emxv1.Empty{}); listErr == nil {
+				for _, in := range list.Inbounds {
+					if in.Id == uint32(id) {
+						managed = isCaddyInboundInfo(in)
+						break
+					}
+				}
+			}
 			if _, err := client.InboundRemove(ctx, &emxv1.IdRequest{Id: uint32(id)}); err != nil {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "removed")
+			if managed {
+				return maybeApplyCaddy(cmd)
+			}
 			return nil
 		},
 	}
@@ -230,7 +267,11 @@ func printInbound(w interface{ Write([]byte) (int, error) }, in *emxv1.InboundIn
 }
 
 func printInboundVerb(w interface{ Write([]byte) (int, error) }, verb string, in *emxv1.InboundInfo, withLink bool) {
-	fmt.Fprintf(w, "%s inbound %q (id %d): %s on :%d → %s\n", verb, in.Name, in.Id, in.Protocol, in.Port, in.Target)
+	endpoint := fmt.Sprintf(":%d", in.Port)
+	if in.Listen != "" && in.Port == 0 {
+		endpoint = in.Listen
+	}
+	fmt.Fprintf(w, "%s inbound %q (id %d): %s on %s → %s\n", verb, in.Name, in.Id, in.Protocol, endpoint, in.Target)
 	if withLink && in.ShareLink != "" {
 		fmt.Fprintf(w, "\nclient link:\n  %s\n", in.ShareLink)
 		if in.TgLink != "" {

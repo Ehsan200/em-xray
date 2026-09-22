@@ -30,6 +30,10 @@ func ShareLink(in Inbound, host string) string {
 		host = "SERVER_IP"
 	}
 	port := strconv.Itoa(in.Port)
+	caddy := IsCaddyXHTTP(in)
+	if caddy {
+		port = "443"
+	}
 
 	switch in.Protocol {
 	case "vless":
@@ -53,6 +57,12 @@ func ShareLink(in Inbound, host string) string {
 				q.Set("sni", in.TLSSNI)
 			}
 			q.Set("allowInsecure", "1") // self-signed cert
+		}
+		if caddy {
+			q.Set("security", "tls")
+			q.Set("sni", host)
+			q.Set("fp", "chrome")
+			q.Set("host", host)
 		}
 		setTransportQuery(q, in)
 		return fmt.Sprintf("vless://%s@%s:%s?%s#%s", in.UUID, host, port, q.Encode(), url.QueryEscape(in.Name))
@@ -138,6 +148,9 @@ func setTransportQuery(q url.Values, in Inbound) {
 	switch in.Network {
 	case "ws", "httpupgrade", "xhttp":
 		q.Set("path", orDefault(in.Path, "/"))
+		if in.Network == "xhttp" {
+			q.Set("mode", orDefault(in.XHTTPMode, "auto"))
+		}
 		if in.Host != "" {
 			q.Set("host", in.Host)
 		}
