@@ -13,6 +13,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 )
 
@@ -75,21 +76,38 @@ func (p Paths) ErrorLog() string  { return filepath.Join(p.State, "xray-error.lo
 func (p Paths) AdoDir() string { return filepath.Join(p.Runtime, "ado") }
 
 func baseDir(env, fallback string) string {
-	if v := os.Getenv(env); v != "" {
-		return filepath.Join(v, app)
-	}
+	uid := os.Getuid()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "/tmp"
 	}
+	// A Linux system service runs root with HOME=/root and no XDG variables,
+	// while sudo policies may preserve the invoking user's HOME/XDG values.
+	// Pin root to its conventional home so both processes open the same DB.
+	if uid == 0 && runtime.GOOS == "linux" {
+		home = "/root"
+	}
+	return baseDirFor(uid, os.Getenv(env), home, fallback)
+}
+
+func baseDirFor(uid int, xdg, home, fallback string) string {
+	if uid != 0 && xdg != "" {
+		return filepath.Join(xdg, app)
+	}
 	return filepath.Join(home, fallback, app)
 }
 
-// runtimeDir prefers $XDG_RUNTIME_DIR; falls back to a uid-scoped /tmp dir so
-// the socket/pid never collide between users on a shared host.
+// runtimeDir prefers $XDG_RUNTIME_DIR for normal users. Root deliberately uses
+// the stable fallback: a system service normally has no XDG_RUNTIME_DIR while
+// `sudo emx` may receive /run/user/0, which used to make the CLI and daemon use
+// different sockets despite sharing the same database.
 func runtimeDir() string {
-	if v := os.Getenv("XDG_RUNTIME_DIR"); v != "" {
-		return filepath.Join(v, app)
+	return runtimeDirFor(os.Getuid(), os.Getenv("XDG_RUNTIME_DIR"), os.TempDir())
+}
+
+func runtimeDirFor(uid int, xdg, temp string) string {
+	if uid != 0 && xdg != "" {
+		return filepath.Join(xdg, app)
 	}
-	return filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Getuid()))
+	return filepath.Join(temp, app+"-"+strconv.Itoa(uid))
 }

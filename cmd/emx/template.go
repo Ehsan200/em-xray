@@ -7,6 +7,7 @@ import (
 	"time"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+	"github.com/ehsan200/em-xray/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -41,5 +42,6 @@ func templateCmd() *cobra.Command {
 
 // errDaemon wraps a dial failure with a hint to start the daemon.
 func errDaemon(err error) error {
-	return fmt.Errorf("cannot reach daemon (is it running? try `emx start`): %w", err)
+	p := paths.Default()
+	return fmt.Errorf("cannot reach daemon at %s (start or restart it using the same user/scope as this command): %w", p.Socket(), err)
 }

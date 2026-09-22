@@ -1,11 +1,26 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 )
+
+func TestCaddyCommandContextFallsBackAndPreservesParent(t *testing.T) {
+	cmd := caddyPrintCmd()
+	if caddyCommandContext(cmd) == nil {
+		t.Fatal("menu-created command must never have a nil context")
+	}
+
+	type key string
+	parent := context.WithValue(context.Background(), key("source"), "menu")
+	cmd.SetContext(parent)
+	if got := caddyCommandContext(cmd).Value(key("source")); got != "menu" {
+		t.Fatalf("context value = %v, want menu", got)
+	}
+}
 
 func TestRenderCaddyfileGroupsDomains(t *testing.T) {
 	inbounds := []*emxv1.InboundInfo{

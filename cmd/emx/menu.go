@@ -40,6 +40,14 @@ func runMenu(cmd *cobra.Command, section string) error {
 		return errDaemon(err)
 	}
 	defer conn.Close()
+	if version != "dev" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ping, pingErr := c.Ping(ctx, &emxv1.PingRequest{})
+		cancel()
+		if pingErr == nil && ping.Version != "" && ping.Version != "dev" && ping.Version != version {
+			return fmt.Errorf("emx CLI is %s but the running daemon is %s; restart the same service/user that owns your configs (`sudo systemctl restart emx` for a system service, or `emx restart` for a user daemon)", version, ping.Version)
+		}
+	}
 	s := &menuSession{c: c, cmd: cmd}
 	switch section {
 	case "main":
@@ -459,6 +467,7 @@ func (s *menuSession) caddyMenu() {
 			action = caddyDisableCmd()
 		}
 		if action != nil {
+			action.SetContext(caddyCommandContext(s.cmd))
 			action.SetOut(s.cmd.OutOrStdout())
 			action.SetErr(s.cmd.ErrOrStderr())
 			if err := action.RunE(action, nil); err != nil {

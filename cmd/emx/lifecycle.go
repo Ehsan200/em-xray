@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -150,6 +151,22 @@ func restartXray(cmd *cobra.Command) error {
 // fresh even if it wasn't running. Used by `emx restart` and by `emx update`
 // after swapping the binary so the new code takes effect.
 func restartDaemon(cmd *cobra.Command) error {
+	// Keep a systemd-managed daemon under systemd. A graceful RPC shutdown is
+	// considered successful, so Restart=on-failure would otherwise leave the
+	// unit inactive while emx spawned an unmanaged replacement.
+	if runtime.GOOS == "linux" {
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			system := os.Geteuid() == 0
+			if systemctl(system, "is-active", "--quiet", systemdUnitName).Run() == nil {
+				restart := systemctl(system, "restart", systemdUnitName)
+				restart.Stdout, restart.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
+				if err := restart.Run(); err != nil {
+					return fmt.Errorf("restart %s: %w", systemdUnitName, err)
+				}
+				return waitReady(5 * time.Second)
+			}
+		}
+	}
 	p := paths.Default()
 	if _, alive := daemon.RunningPID(p); alive {
 		if c, conn, err := dialReady(cmd.Context()); err == nil {

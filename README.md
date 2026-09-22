@@ -53,48 +53,69 @@ your client ──vless/reality──▶ emx inbound ──▶ master ──dial
 
 ## Install
 
-### Download a release
+### Install the latest release globally on a Linux server
 
-Prebuilt binaries for linux/macOS × amd64/arm64 are attached to each GitHub release.
-The xray binary + geo data are bundled inside the archive — nothing else to fetch.
+Prebuilt amd64 and arm64 releases contain both `emx` and the matching embedded xray. The following
+commands detect the server architecture, download the latest release, and install `emx` in
+`/usr/local/bin` so it is available to every shell and to systemd:
 
 ```bash
-VERSION=v1.0.0                       # pick a tag from the releases page
-OS=linux                             # linux | darwin
-ARCH=amd64                           # amd64 | arm64
+case "$(uname -m)" in
+  x86_64|amd64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $(uname -m)"; exit 1 ;;
+esac
 
-curl -LO "https://github.com/Ehsan200/em-xray/releases/download/$VERSION/emx-$VERSION-$OS-$ARCH.tar.gz"
-tar -xzf "emx-$VERSION-$OS-$ARCH.tar.gz"          # extracts emx-$OS-$ARCH/
-sudo install "emx-$OS-$ARCH/emx" /usr/local/bin/emx
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+  https://github.com/Ehsan200/em-xray/releases/latest)"
+VERSION="${LATEST_URL##*/}"
+EMX_INSTALL_DIR="$(mktemp -d)"
+curl -fL \
+  "https://github.com/Ehsan200/em-xray/releases/download/${VERSION}/emx-${VERSION}-linux-${ARCH}.tar.gz" \
+  -o "${EMX_INSTALL_DIR}/emx.tar.gz"
+tar -xzf "${EMX_INSTALL_DIR}/emx.tar.gz" -C "${EMX_INSTALL_DIR}"
+sudo install -m 0755 "${EMX_INSTALL_DIR}/emx-linux-${ARCH}/emx" /usr/local/bin/emx
+rm -rf "${EMX_INSTALL_DIR}"
+
+command -v emx       # /usr/local/bin/emx
 emx version
 ```
 
-### Make `emx` global on a server
-
-Putting the binary in `/usr/local/bin` makes `emx` available to every shell and to systemd. This
-works for either a downloaded binary or a local build:
-
-```bash
-sudo install -m 0755 ./emx /usr/local/bin/emx
-command -v emx          # /usr/local/bin/emx
-emx version
-```
-
-When Caddy integration is used, run emx as a system service so Caddy and emx share one system-wide
-configuration. Use `sudo emx ...` consistently; a non-root emx daemon has a different database and
-control socket.
+For a new Caddy/XHTTP server, use one root-owned system service and always use `sudo emx ...`. This
+keeps the CLI, daemon, database, Xray sockets, and Caddy configuration in the same scope:
 
 ```bash
 sudo emx systemd install --system --now
 sudo emx status
+sudo emx                         # open the interactive menu
 ```
 
-One-liner for the latest linux/amd64 build:
+If emx is already installed and you replace `/usr/local/bin/emx` manually, restart the existing
+daemon so the process loads the new binary and templates:
 
 ```bash
-curl -sL https://api.github.com/repos/Ehsan200/em-xray/releases/latest \
-  | grep -o 'https://[^"]*linux-amd64\.tar\.gz' \
-  | xargs curl -L | tar -xz
+sudo systemctl restart emx.service
+sudo emx status
+sudo emx template ls             # includes vless-caddy-xhttp
+```
+
+Do not alternate between `emx` and `sudo emx`: they intentionally use different databases. A normal
+user reads `~/.local/share/emx/emx.db`; every root invocation and the system service use
+`/root/.local/share/emx/emx.db`, regardless of inherited `HOME` or XDG variables. To
+move an existing user configuration to the system service, export it before changing scope:
+
+```bash
+emx config export --out /tmp/emx-backup.json
+emx stop
+sudo emx systemd install --system --now
+sudo emx config import /tmp/emx-backup.json
+rm /tmp/emx-backup.json           # contains credentials; remove it after checking the import
+```
+
+For a downloaded or locally built binary that is already on disk, only the install step is needed:
+
+```bash
+sudo install -m 0755 ./emx /usr/local/bin/emx
 ```
 
 ### Build from source
@@ -181,6 +202,11 @@ sudo emx in add edge \
   --domain x.example.com \
   --to direct
 ```
+
+The same flow is available in the interactive menu: run `sudo emx`, choose **Inbounds → Add**, then
+select **vless-caddy-xhttp**. Installation, generated domains, apply, enable, disable, and status are
+under the top-level **Caddy** menu. If that template is missing, the running daemon is older than the
+installed CLI; run `sudo systemctl restart emx.service` and open the menu again.
 
 Because this is a Caddy-managed inbound, emx validates and applies the Caddyfile automatically when
 it has root access. Applying explicitly is safe and useful after manual edits:
@@ -283,9 +309,29 @@ sudo emx systemd install --system --now
 ### Updating
 
 ```bash
-emx update              # check GitHub, download the matching build, swap the binary, restart the daemon
-emx update --check      # just report whether a newer release exists
-emx update --proxy tg   # fetch through your socks inbound named "tg" (see below)
+# System-wide/root installation (recommended for Caddy):
+sudo emx update              # download, replace /usr/local/bin/emx, restart emx.service
+sudo emx update --check      # only report whether a newer release exists
+
+# Per-user installation (do not use sudo for this scope):
+emx update                   # update and restart that user's daemon/service
+
+sudo emx update --proxy tg   # fetch through the root daemon's socks inbound named "tg"
+```
+
+Run the update with the same user that owns the daemon and configurations. Updating as another user
+does not delete anything, but it selects that user's separate database and can make the original
+configuration appear to have vanished. `emx update` also detects an already-current binary with an
+older running daemon and restarts it.
+
+Older builds could let `sudo emx` look for `/run/user/0/emx/emx.sock` while the system service used
+`/tmp/emx-0/emx.sock`. If that exact old error prevents the update, unset only the inherited runtime
+variable for the upgrade, then restart the service:
+
+```bash
+sudo env -u XDG_RUNTIME_DIR emx update
+sudo systemctl restart emx.service
+sudo emx xray paths
 ```
 
 The running daemon also checks for new releases every 6h and flags it in `emx status`.
@@ -567,6 +613,11 @@ state    $XDG_STATE_HOME/emx     xray access/error logs
 cache    $XDG_CACHE_HOME/emx     extracted xray binary + geo data
 runtime  $XDG_RUNTIME_DIR/emx    control socket, pid, generated config.json
 ```
+
+For root, data/config/state/cache paths are pinned under `/root` and runtime files always use
+`/tmp/emx-0`. This makes `sudo emx` and a systemd system service agree even if sudo preserves a
+user's `HOME`/XDG variables or only the login shell has `XDG_RUNTIME_DIR=/run/user/0`. Other users
+follow XDG and fall back to `/tmp/emx-<uid>` for runtime files.
 
 The normal daemon needs no elevated privileges—it uses loopback listeners and a child process. A
 system-wide root daemon is recommended when emx also manages Caddy and `/etc/caddy/Caddyfile`. The

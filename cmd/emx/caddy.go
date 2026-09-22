@@ -74,7 +74,7 @@ func caddyInstallCmd() *cobra.Command {
 			}
 			for _, step := range steps {
 				fmt.Fprintf(cmd.OutOrStdout(), "running: %s\n", strings.Join(step, " "))
-				c := exec.CommandContext(cmd.Context(), step[0], step[1:]...)
+				c := exec.CommandContext(caddyCommandContext(cmd), step[0], step[1:]...)
 				c.Stdout, c.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
 				if err := c.Run(); err != nil {
 					return fmt.Errorf("%s: %w", step[0], err)
@@ -142,7 +142,7 @@ func caddyApplyCmd() *cobra.Command {
 				return err
 			}
 			if len(inbounds) == 0 {
-				stop := exec.CommandContext(cmd.Context(), "systemctl", "disable", "--now", "caddy")
+				stop := exec.CommandContext(caddyCommandContext(cmd), "systemctl", "disable", "--now", "caddy")
 				if out, err := stop.CombinedOutput(); err != nil {
 					return fmt.Errorf("no Caddy/XHTTP inbounds remain, but Caddy could not be disabled: %v: %s", err, strings.TrimSpace(string(out)))
 				}
@@ -179,7 +179,7 @@ func caddyServiceCmd(use, short string, args ...string) *cobra.Command {
 			if os.Geteuid() != 0 {
 				return fmt.Errorf("this command needs root; run `sudo emx caddy %s`", use)
 			}
-			c := exec.CommandContext(cmd.Context(), "systemctl", args...)
+			c := exec.CommandContext(caddyCommandContext(cmd), "systemctl", args...)
 			c.Stdout, c.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
 			if err := c.Run(); err != nil {
 				return fmt.Errorf("systemctl %s: %w", use, err)
@@ -199,11 +199,12 @@ func caddyStatusCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "caddy: not installed")
 				return nil
 			}
-			version, _ := exec.CommandContext(cmd.Context(), path, "version").Output()
+			ctx := caddyCommandContext(cmd)
+			version, _ := exec.CommandContext(ctx, path, "version").Output()
 			fmt.Fprintf(cmd.OutOrStdout(), "caddy: installed (%s)\n", strings.TrimSpace(string(version)))
 			if runtime.GOOS == "linux" {
-				active := exec.CommandContext(cmd.Context(), "systemctl", "is-active", "--quiet", "caddy").Run() == nil
-				enabled := exec.CommandContext(cmd.Context(), "systemctl", "is-enabled", "--quiet", "caddy").Run() == nil
+				active := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "caddy").Run() == nil
+				enabled := exec.CommandContext(ctx, "systemctl", "is-enabled", "--quiet", "caddy").Run() == nil
 				fmt.Fprintf(cmd.OutOrStdout(), "service: active=%v enabled=%v\n", active, enabled)
 			}
 			return nil
@@ -212,7 +213,7 @@ func caddyStatusCmd() *cobra.Command {
 }
 
 func loadCaddyConfig(cmd *cobra.Command) (string, []*emxv1.InboundInfo, error) {
-	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(caddyCommandContext(cmd), 5*time.Second)
 	defer cancel()
 	client, conn, err := dialReady(ctx)
 	if err != nil {
@@ -224,6 +225,16 @@ func loadCaddyConfig(cmd *cobra.Command) (string, []*emxv1.InboundInfo, error) {
 		return "", nil, err
 	}
 	return renderCaddyfile(reply.Inbounds)
+}
+
+// caddyCommandContext keeps Caddy commands safe when called from the menu.
+// Cobra initializes a command context in Execute; menu actions call RunE
+// directly, so cmd.Context() may otherwise be nil.
+func caddyCommandContext(cmd *cobra.Command) context.Context {
+	if cmd != nil && cmd.Context() != nil {
+		return cmd.Context()
+	}
+	return context.Background()
 }
 
 func renderCaddyfile(all []*emxv1.InboundInfo) (string, []*emxv1.InboundInfo, error) {
@@ -345,7 +356,8 @@ func applyCaddyConfig(cmd *cobra.Command, path string, cfg []byte, noReload bool
 		return err
 	}
 	defer os.Remove(tmp)
-	validate := exec.CommandContext(cmd.Context(), "caddy", "validate", "--config", tmp, "--adapter", "caddyfile")
+	ctx := caddyCommandContext(cmd)
+	validate := exec.CommandContext(ctx, "caddy", "validate", "--config", tmp, "--adapter", "caddyfile")
 	if out, err := validate.CombinedOutput(); err != nil {
 		return fmt.Errorf("caddy validation failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -375,15 +387,15 @@ func applyCaddyConfig(cmd *cobra.Command, path string, cfg []byte, noReload bool
 			_ = os.WriteFile(path, old, 0o644)
 		}
 	}
-	if exec.CommandContext(cmd.Context(), "systemctl", "is-active", "--quiet", "caddy").Run() != nil {
-		start := exec.CommandContext(cmd.Context(), "systemctl", "enable", "--now", "caddy")
+	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "caddy").Run() != nil {
+		start := exec.CommandContext(ctx, "systemctl", "enable", "--now", "caddy")
 		if out, err := start.CombinedOutput(); err != nil {
 			rollback()
 			return fmt.Errorf("start caddy: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
-	reload := exec.CommandContext(cmd.Context(), "caddy", "reload", "--config", path, "--adapter", "caddyfile")
+	reload := exec.CommandContext(ctx, "caddy", "reload", "--config", path, "--adapter", "caddyfile")
 	if out, err := reload.CombinedOutput(); err != nil {
 		rollback()
 		return fmt.Errorf("reload caddy: %v: %s", err, strings.TrimSpace(string(out)))
@@ -408,7 +420,7 @@ func maybeApplyCaddy(cmd *cobra.Command) error {
 		return err
 	}
 	if len(inbounds) == 0 {
-		stop := exec.CommandContext(cmd.Context(), "systemctl", "disable", "--now", "caddy")
+		stop := exec.CommandContext(caddyCommandContext(cmd), "systemctl", "disable", "--now", "caddy")
 		if out, err := stop.CombinedOutput(); err != nil {
 			return fmt.Errorf("disable Caddy after removing its last inbound: %v: %s", err, strings.TrimSpace(string(out)))
 		}

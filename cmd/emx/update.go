@@ -80,6 +80,13 @@ func updateCmd() *cobra.Command {
 			}
 			if !selfupdate.Newer(version, rel.Tag) {
 				fmt.Fprintf(out, "up to date (%s)\n", version)
+				if !checkOnly && !noRestart && daemonVersionDiffers(cmd, version) {
+					fmt.Fprintln(out, "running daemon is older; restarting it on the installed version…")
+					if err := restartDaemon(cmd); err != nil {
+						return fmt.Errorf("binary is current, but daemon restart failed (run `emx restart`): %w", err)
+					}
+					fmt.Fprintln(out, "daemon restarted on the installed version")
+				}
 				return nil
 			}
 			fmt.Fprintf(out, "update available: %s → %s\n", version, rel.Tag)
@@ -124,6 +131,26 @@ func updateCmd() *cobra.Command {
 	c.Flags().StringVar(&proxyPass, "proxy-pass", "",
 		"`password` for --proxy-user; prefer "+envPass+" in the environment, since a flag is visible in `ps`")
 	return c
+}
+
+// daemonVersionDiffers catches a manual/global binary replacement that left
+// the old process serving stale templates and RPC behaviour.
+func daemonVersionDiffers(cmd *cobra.Command, want string) bool {
+	if want == "" || want == "dev" {
+		return false
+	}
+	if _, alive := daemon.RunningPID(paths.Default()); !alive {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+	defer cancel()
+	client, conn, err := dialReady(ctx)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	reply, err := client.Ping(ctx, &emxv1.PingRequest{})
+	return err == nil && reply.Version != "" && reply.Version != want
 }
 
 // looksLikeAddress reports whether spec is already a proxy address (a URL, or a
