@@ -81,14 +81,20 @@ func updateCmd() *cobra.Command {
 			}
 			if !selfupdate.Newer(version, rel.Tag) {
 				fmt.Fprintf(out, "up to date (%s)\n", version)
-				if !checkOnly && !noRestart && daemonVersionDiffers(cmd, version) {
-					fmt.Fprintln(out, "running daemon is older; restarting it on the installed version…")
-					if err := restartDaemon(cmd); err != nil {
-						return fmt.Errorf("binary is current, but daemon restart failed (run `emx restart`): %w", err)
-					}
-					fmt.Fprintln(out, "daemon restarted on the installed version")
+				if checkOnly || noRestart {
+					return nil
 				}
-				return nil
+				// Nothing to download, but the runtime may still lag the
+				// binary: a daemon from before a manual install, or none at all.
+				switch {
+				case daemonVersionDiffers(cmd, version):
+					fmt.Fprintln(out, "running daemon is older; restarting it on the installed version…")
+				case !daemonPresent():
+					fmt.Fprintln(out, "daemon is not running; starting it…")
+				default:
+					return nil
+				}
+				return finishUpdate(cmd, version)
 			}
 			fmt.Fprintf(out, "update available: %s → %s\n", version, rel.Tag)
 			if checkOnly {
@@ -108,18 +114,11 @@ func updateCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out, "\nupdated to %s\n", rel.Tag)
 
-			// Restart the running daemon so it executes the new binary.
-			alive := daemonPresent()
-			if alive && !noRestart {
-				fmt.Fprintln(out, "restarting daemon…")
-				if err := restartDaemon(cmd); err != nil {
-					return fmt.Errorf("updated, but daemon restart failed (run `emx restart`): %w", err)
-				}
-				fmt.Fprintln(out, "daemon restarted on the new version")
-			} else if alive {
+			if noRestart {
 				fmt.Fprintln(out, "restart the daemon to run the new version:  emx restart")
+				return nil
 			}
-			return nil
+			return finishUpdate(cmd, rel.Tag)
 		},
 	}
 	c.Flags().BoolVar(&checkOnly, "check", false, "only report whether an update is available")
@@ -243,4 +242,103 @@ func human(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
+}
+
+// finishUpdate brings everything onto the installed binary with no manual
+// step: refresh the systemd unit if it is stale, stop leftovers from the old
+// build, (re)start the daemon — also when it was not running — and wait until
+// the new daemon answers with the new version and its xray is up.
+func finishUpdate(cmd *cobra.Command, want string) error {
+	out := cmd.OutOrStdout()
+	if err := refreshSystemdUnit(out); err != nil {
+		fmt.Fprintf(out, "warning: %v\n", err)
+	}
+	fmt.Fprintln(out, "restarting daemon…")
+	if err := restartDaemon(cmd); err != nil {
+		return fmt.Errorf("binary installed, but the daemon did not start: %w (see `emx xray logs`)", err)
+	}
+	return verifyRuntime(cmd, want)
+}
+
+// verifyRuntime waits for the daemon to report version want and for xray to
+// run, then prints one line per component. Failing loudly here is the point:
+// an update that "succeeded" onto a daemon that isn't serving is worse than
+// an error.
+func verifyRuntime(cmd *cobra.Command, want string) error {
+	out := cmd.OutOrStdout()
+	deadline := time.Now().Add(20 * time.Second)
+	var st *emxv1.StatusReply
+	var got string
+	for {
+		ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+		if c, conn, err := dialReady(ctx); err == nil {
+			if p, err := c.Ping(ctx, &emxv1.PingRequest{}); err == nil {
+				got = p.Version
+			}
+			st, _ = c.Status(ctx, &emxv1.StatusRequest{})
+			conn.Close()
+		}
+		cancel()
+		versionOK := sameVersion(got, want)
+		xrayUp := st != nil && st.Xray != nil && st.Xray.Running
+		if versionOK && (xrayUp || !hasEnabledInbound(cmd)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			if !versionOK {
+				return fmt.Errorf("the daemon is running %q, not %s — run `emx restart`", got, want)
+			}
+			msg := "xray did not start"
+			if st != nil && st.Xray != nil {
+				if st.Xray.ConfigError != "" {
+					msg += ": " + st.Xray.ConfigError
+				} else if st.Xray.LastError != "" {
+					msg += ": " + st.Xray.LastError
+				}
+			}
+			return fmt.Errorf("daemon %s is up, but %s (see `emx xray logs`)", got, msg)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	fmt.Fprintf(out, "daemon:  %s (pid %d)\n", got, st.DaemonPid)
+	if st.Xray != nil && st.Xray.Running {
+		fmt.Fprintf(out, "xray:    running (pid %d)\n", st.Xray.Pid)
+	} else {
+		fmt.Fprintln(out, "xray:    idle (no enabled inbound to serve)")
+	}
+	if st.Xray != nil && st.Xray.ConfigError != "" {
+		fmt.Fprintf(out, "config:  %s\n", st.Xray.ConfigError)
+	}
+	return nil
+}
+
+// sameVersion compares release tags, ignoring a leading "v". A "dev" build
+// can't be told apart, so it passes.
+func sameVersion(got, want string) bool {
+	if want == "" || want == "dev" {
+		return got != ""
+	}
+	return strings.TrimPrefix(got, "v") == strings.TrimPrefix(want, "v")
+}
+
+// hasEnabledInbound reports whether xray has anything to serve; without one
+// the daemon intentionally keeps xray down.
+func hasEnabledInbound(cmd *cobra.Command) bool {
+	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+	defer cancel()
+	c, conn, err := dialReady(ctx)
+	if err != nil {
+		return true // can't tell: keep waiting for xray
+	}
+	defer conn.Close()
+	list, err := c.InboundList(ctx, &emxv1.Empty{})
+	if err != nil {
+		return true
+	}
+	for _, in := range list.Inbounds {
+		if in.Enabled {
+			return true
+		}
+	}
+	return false
 }

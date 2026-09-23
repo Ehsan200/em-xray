@@ -34,3 +34,20 @@ func TestLooksLikeAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestSameVersion(t *testing.T) {
+	for _, c := range []struct {
+		got, want string
+		ok        bool
+	}{
+		{"v1.2.3", "v1.2.3", true},
+		{"1.2.3", "v1.2.3", true},
+		{"v1.2.2", "v1.2.3", false},
+		{"", "v1.2.3", false},
+		{"anything", "dev", true},
+	} {
+		if got := sameVersion(c.got, c.want); got != c.ok {
+			t.Errorf("sameVersion(%q, %q) = %v, want %v", c.got, c.want, got, c.ok)
+		}
+	}
+}

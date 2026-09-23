@@ -161,17 +161,25 @@ func restartDaemon(cmd *cobra.Command) error {
 	// An upgrade can move the runtime directory, so a daemon started by the
 	// previous build is invisible to the pid file but still owns an xray child.
 	stopStaleProcesses(cmd)
-	// Keep a systemd-managed daemon under systemd. A graceful RPC shutdown is
-	// considered successful, so Restart=on-failure would otherwise leave the
-	// unit inactive while emx spawned an unmanaged replacement.
-	if systemdDaemonActive() {
+	// Keep a systemd-managed daemon under systemd — including one whose unit
+	// is installed but stopped or failed: `systemctl restart` starts it, where
+	// spawning a detached daemon would leave an unmanaged one beside the unit.
+	// (A graceful RPC shutdown counts as success, so Restart=on-failure would
+	// otherwise leave the unit inactive.)
+	if active := systemdDaemonActive(); active || systemdUnitInstalled() {
 		system := os.Geteuid() == 0
 		restart := systemctl(system, "restart", systemdUnitName)
 		restart.Stdout, restart.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
-		if err := restart.Run(); err != nil {
+		err := restart.Run()
+		if err == nil {
+			return waitReady(15 * time.Second)
+		}
+		if active {
 			return fmt.Errorf("restart %s: %w", systemdUnitName, err)
 		}
-		return waitReady(5 * time.Second)
+		// An installed but unusable unit (e.g. no user systemd session):
+		// fall through and run the daemon ourselves rather than leave it down.
+		fmt.Fprintf(cmd.OutOrStdout(), "systemctl restart %s failed (%v); starting the daemon directly\n", systemdUnitName, err)
 	}
 	p := paths.Default()
 	if _, alive := daemon.RunningPID(p); alive {

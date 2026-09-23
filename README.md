@@ -133,7 +133,7 @@ or domain means re-importing the client link; changing the email changes the sta
 ## Updating
 
 ```bash
-sudo emx update              # download, replace the binary, restart the daemon
+sudo emx update              # download, replace the binary, restart everything, verify
 sudo emx update --check      # report only
 sudo emx update --proxy tg   # fetch through your own socks inbound named "tg"
 ```
@@ -149,6 +149,14 @@ sudo emx in ls               # should be exactly what you had
 ```
 
 If it adopted the wrong one, the old file is still there — import it with `sudo emx config import`.
+
+**Nothing to do after `emx update`.** It rewrites a stale systemd unit (and reloads systemd), stops
+leftovers from the old build (a daemon from an older layout, orphaned xray), restarts the daemon —
+through systemd when a unit is installed, and also when the daemon wasn't running at all — then waits
+until the new daemon answers with the new version and its xray is serving. If any of that fails, the
+command fails and says why (xray's own reason included). Run on an already-current binary, it still
+restarts a daemon that is older than the binary, or starts one that is down. `--no-restart` skips
+all of it.
 
 The daemon also checks for releases every 6h and flags it in `emx status`.
 

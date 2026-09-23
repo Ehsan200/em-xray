@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,4 +167,48 @@ func systemdPrintCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&system, "system", false, "render the system-wide variant")
 	return c
+}
+
+// systemdUnitInstalled reports whether this scope has an emx unit file, i.e.
+// systemd — not emx — should own the daemon, whether or not it is running now.
+func systemdUnitInstalled() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+	path, err := unitPath(os.Geteuid() == 0)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
+}
+
+// refreshSystemdUnit rewrites an installed unit whose content no longer matches
+// what this build generates (a moved binary, a changed ExecStart) and reloads
+// systemd, so the restart that follows runs the right thing. No unit = no-op.
+func refreshSystemdUnit(out io.Writer) error {
+	if !systemdUnitInstalled() {
+		return nil
+	}
+	system := os.Geteuid() == 0
+	path, _ := unitPath(system)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	want := genUnit(exe, system)
+	if cur, err := os.ReadFile(path); err == nil && string(cur) == want {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		return fmt.Errorf("refresh %s: %w", path, err)
+	}
+	if err := systemctl(system, "daemon-reload").Run(); err != nil {
+		return fmt.Errorf("systemctl daemon-reload: %w", err)
+	}
+	fmt.Fprintf(out, "refreshed %s\n", path)
+	return nil
 }
