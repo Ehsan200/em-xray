@@ -1,6 +1,9 @@
 package xray
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseDialer(t *testing.T) {
 	refs, err := ParseDialer(" xray:A , xraysub:S ,proxy:P ")
@@ -48,7 +51,7 @@ func TestGenerateWithSlots(t *testing.T) {
 		{Name: "node1", Enabled: true, Outbound: `{"protocol":"freedom","settings":{}}`},
 	}
 	slots := []Slot{{Master: "M", Members: []SlotMember{
-		{Key: "abc123", Outbound: `{"protocol":"freedom","settings":{}}`},
+		{Key: "abc123", Outbound: `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.4","port":1080}]}}`},
 	}}}
 	b, err := Generate(entries, nil, slots, GenOptions{})
 	if err != nil {
@@ -60,8 +63,8 @@ func TestGenerateWithSlots(t *testing.T) {
 	if dig(t, m, "api", "tag") != "api" {
 		t.Error("api block missing")
 	}
-	if dig(t, m, "observatory", "probeInterval") != DefaultProbeInterval {
-		t.Error("observatory missing")
+	if dig(t, m, "burstObservatory", "pingConfig", "interval") != DefaultProbeInterval {
+		t.Error("burst observatory missing")
 	}
 
 	// api routing rule must be FIRST.
@@ -70,13 +73,19 @@ func TestGenerateWithSlots(t *testing.T) {
 		t.Errorf("api rule must be first, got %v", rules[0])
 	}
 
-	// balancer over slot0-out- prefix, leastPing.
+	// balancer over slot0-out- prefix.
 	bals := dig(t, m, "routing", "balancers").([]any)
 	if dig(t, bals, 0, "tag") != "slot0-bal" {
 		t.Errorf("balancer tag = %v", dig(t, bals, 0, "tag"))
 	}
 	if dig(t, bals, 0, "selector").([]any)[0] != "slot0-out-" {
 		t.Errorf("balancer selector = %v", dig(t, bals, 0, "selector"))
+	}
+	// leastLoad over the best two, so one node dying never takes every
+	// connection of the pool with it.
+	if dig(t, bals, 0, "strategy", "type") != "leastLoad" ||
+		dig(t, bals, 0, "strategy", "settings", "expected") != float64(SlotBalancerExpected) {
+		t.Errorf("balancer strategy = %v", dig(t, bals, 0, "strategy"))
 	}
 
 	// master outbound got the dialerProxy sockopt.
@@ -112,8 +121,8 @@ func TestGenerateMultipleMasters(t *testing.T) {
 		{Name: "n", Enabled: true, Outbound: `{"protocol":"freedom","settings":{}}`},
 	}
 	slots := []Slot{
-		{Master: "Mbeta", Members: []SlotMember{{Key: "k1", Outbound: `{"protocol":"freedom"}`}}},
-		{Master: "Malpha", Members: []SlotMember{{Key: "k2", Outbound: `{"protocol":"freedom"}`}}},
+		{Master: "Mbeta", Index: 1, Members: []SlotMember{{Key: "k1", Outbound: `{"protocol":"freedom"}`}}},
+		{Master: "Malpha", Index: 0, Members: []SlotMember{{Key: "k2", Outbound: `{"protocol":"freedom"}`}}},
 	}
 	m := om(t, mustGen(t, entries, slots))
 
@@ -147,20 +156,16 @@ func mustGen(t *testing.T, entries []XrayEntry, slots []Slot) []byte {
 	return b
 }
 
-func TestGenerateNoSlotsNoObservatory(t *testing.T) {
+// The api, stats and burst observatory are always emitted — even with no
+// masters — so adding the first master is a live apply, not a restart.
+func TestGenerateNoSlotsKeepsLiveSections(t *testing.T) {
 	b, _ := Generate([]XrayEntry{{Name: "e", Enabled: true, Outbound: `{"protocol":"freedom"}`}}, nil, nil, GenOptions{})
 	m := om(t, b)
-	// api + stats are always on now (for traffic counters); observatory is not.
-	if _, ok := m["api"]; !ok {
-		t.Error("api block must always be present (stats)")
+	for _, k := range []string{"api", "stats", "burstObservatory"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("%s must always be present", k)
+		}
 	}
-	if _, ok := m["stats"]; !ok {
-		t.Error("stats must always be present")
-	}
-	if _, ok := m["observatory"]; ok {
-		t.Error("no slots => no observatory")
-	}
-	// StatsService present, ObservatoryService absent without slots.
 	svcs := dig(t, m, "api", "services").([]any)
 	var hasStats, hasObs bool
 	for _, s := range svcs {
@@ -171,7 +176,126 @@ func TestGenerateNoSlotsNoObservatory(t *testing.T) {
 			hasObs = true
 		}
 	}
-	if !hasStats || hasObs {
-		t.Errorf("services = %v; want StatsService, no ObservatoryService", svcs)
+	if !hasStats || !hasObs {
+		t.Errorf("services = %v; want StatsService and ObservatoryService", svcs)
+	}
+	if _, ok := m["routing"].(map[string]any)["balancers"]; ok {
+		t.Error("no slots => no balancers")
+	}
+}
+
+// Masters sharing a pool share one slot: one inbound, one balancer, one set of
+// members (so one set of probes) — but each keeps its own dialer outbound.
+func TestGenerateSharedSlot(t *testing.T) {
+	entries := []XrayEntry{
+		{Name: "A", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`},
+		{Name: "B", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`},
+	}
+	slots := []Slot{{Master: "A", Aliases: []string{"B"}, Index: 0, Members: []SlotMember{
+		{Key: "n1", Outbound: `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.4","port":1}]}}`},
+	}}}
+	m := om(t, mustGen(t, entries, slots))
+
+	if n := len(dig(t, m, "routing", "balancers").([]any)); n != 1 {
+		t.Fatalf("balancers = %d, want 1 shared", n)
+	}
+	var slotIns, members int
+	for _, in := range dig(t, m, "inbounds").([]any) {
+		if tag, _ := in.(map[string]any)["tag"].(string); strings.HasPrefix(tag, "slot") {
+			slotIns++
+		}
+	}
+	dialers := map[string]any{}
+	proxies := map[string]any{}
+	for _, o := range dig(t, m, "outbounds").([]any) {
+		ob := o.(map[string]any)
+		tag := ob["tag"].(string)
+		switch {
+		case strings.HasPrefix(tag, "slot0-out-"):
+			members++
+		case strings.HasPrefix(tag, "dialer-"):
+			dialers[tag] = dig(t, ob, "settings", "servers", 0, "port")
+		case tag == "out-A" || tag == "out-B":
+			proxies[tag] = dig(t, ob, "streamSettings", "sockopt", "dialerProxy")
+		}
+	}
+	if slotIns != 1 || members != 1 {
+		t.Errorf("slot inbounds = %d, members = %d; want 1 and 1", slotIns, members)
+	}
+	port := float64(SlotPort(0))
+	if len(dialers) != 2 || dialers["dialer-A"] != port || dialers["dialer-B"] != port {
+		t.Errorf("each master needs its own dialer outbound into the shared slot: %v", dialers)
+	}
+	if proxies["out-A"] != "dialer-A" || proxies["out-B"] != "dialer-B" {
+		t.Errorf("each master must keep its own dialerProxy: %v", proxies)
+	}
+}
+
+// A master left without a slot (all slots used) must not dial off this box.
+func TestGenerateSlotlessMasterBlocked(t *testing.T) {
+	entries := []XrayEntry{{Name: "M", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`}}
+	m := om(t, mustGen(t, entries, nil))
+	for _, o := range dig(t, m, "outbounds").([]any) {
+		ob := o.(map[string]any)
+		if ob["tag"] == "out-M" {
+			if got := dig(t, ob, "streamSettings", "sockopt", "dialerProxy"); got != "block" {
+				t.Fatalf("slotless master dialerProxy = %v, want block", got)
+			}
+			return
+		}
+	}
+	t.Fatal("out-M missing")
+}
+
+// The balancer falls back to the pool's first TUNNELLING member (so a fresh
+// slot works before the first ping lands), and to block only when the pool is
+// empty. A freedom member is never emitted: it would egress from this box.
+func TestGenerateFallbackIsFirstTunnelMember(t *testing.T) {
+	entries := []XrayEntry{{Name: "M", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`}}
+	sock := `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.4","port":1}]}}`
+	slots := []Slot{{Master: "M", Members: []SlotMember{
+		{Key: "direct", Outbound: `{"protocol":"freedom"}`},
+		{Key: "n1", Outbound: sock},
+		{Key: "n2", Outbound: sock},
+	}}}
+	m := om(t, mustGen(t, entries, slots))
+	if got := dig(t, m, "routing", "balancers", 0, "fallbackTag"); got != "slot0-out-n1" {
+		t.Errorf("fallbackTag = %v, want first tunnelling member slot0-out-n1", got)
+	}
+	for _, o := range dig(t, m, "outbounds").([]any) {
+		if o.(map[string]any)["tag"] == "slot0-out-direct" {
+			t.Error("freedom member emitted — it would dial the master's server off this box")
+		}
+	}
+
+	slots[0].Members = nil
+	m = om(t, mustGen(t, entries, slots))
+	if got := dig(t, m, "routing", "balancers", 0, "fallbackTag"); got != "block" {
+		t.Errorf("empty pool fallbackTag = %v, want block", got)
+	}
+}
+
+func TestCheckMemberOutbound(t *testing.T) {
+	for _, ok := range []string{"vless", "vmess", "trojan", "shadowsocks", "socks", "http", "hysteria", "wireguard"} {
+		if err := CheckMemberOutbound(`{"protocol":"` + ok + `"}`); err != nil {
+			t.Errorf("%s rejected: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"freedom", "blackhole", "dns", "loopback", ""} {
+		if CheckMemberOutbound(`{"protocol":"`+bad+`"}`) == nil {
+			t.Errorf("%q accepted as a pool member", bad)
+		}
+	}
+}
+
+func TestDialerGroupKeyOrderInsensitive(t *testing.T) {
+	a, _ := ParseDialer("xraysub:s,xray:n")
+	b, _ := ParseDialer("xray:n, xraysub:s, xray:n")
+	c, _ := ParseDialer("xraysub:s")
+	if DialerGroupKey(a) != DialerGroupKey(b) {
+		t.Errorf("same refs in another order must share a key: %q vs %q", DialerGroupKey(a), DialerGroupKey(b))
+	}
+	if DialerGroupKey(a) == DialerGroupKey(c) {
+		t.Error("different ref sets must not share a key")
 	}
 }

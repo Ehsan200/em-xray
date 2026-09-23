@@ -86,11 +86,14 @@ type SubNodeOverride struct {
 // fed to it by an Inbound (see Inbound.Target). A non-empty Dialer makes it a
 // master whose transport tunnels through a node pool.
 type XrayEntry struct {
-	ID        uint   `gorm:"primaryKey"`
-	Name      string `gorm:"uniqueIndex;not null"`
-	Outbound  string `gorm:"not null"` // raw outbound JSON
-	Enabled   bool   `gorm:"default:true"`
-	Dialer    string // "" = normal; else comma-sep typed refs: xray:N,xraysub:N,proxy:N
+	ID       uint   `gorm:"primaryKey"`
+	Name     string `gorm:"uniqueIndex;not null"`
+	Outbound string `gorm:"not null"` // raw outbound JSON
+	Enabled  bool   `gorm:"default:true"`
+	Dialer   string // "" = normal; else comma-sep typed refs: xray:N,xraysub:N,proxy:N
+	// Mux opts the entry's outbound into xray mux.cool where MuxSupport allows
+	// (see mux.go); ignored elsewhere.
+	Mux       bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

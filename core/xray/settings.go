@@ -20,12 +20,11 @@ const (
 	SettingProbeInterval = "probe_interval_sec"
 )
 
-// Observatory probe cadence bounds. The interval is a latency/traffic trade
-// with a safety edge: after every xray restart a master has no observation yet,
-// so its balancer picks nothing and fails closed until the first probe lands.
-// Shorter interval = shorter blackout, more probe traffic.
+// Burst-observatory ping cadence bounds. The interval is a reaction-time /
+// probe-traffic trade: leastLoad drops a failing node on its next ping, and
+// after an xray restart no member is ranked until the first ping lands.
 const (
-	DefaultProbeIntervalSec = 60
+	DefaultProbeIntervalSec = 10
 	MinProbeIntervalSec     = 5
 	MaxProbeIntervalSec     = 3600
 )

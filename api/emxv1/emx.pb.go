@@ -460,6 +460,8 @@ type WinnerInfo struct {
 	Node          string                 `protobuf:"bytes,2,opt,name=node,proto3" json:"node,omitempty"`        // winning member name ("" if none selected yet)
 	Tag           string                 `protobuf:"bytes,3,opt,name=tag,proto3" json:"tag,omitempty"`          // slotN-out-<key>
 	Members       int32                  `protobuf:"varint,4,opt,name=members,proto3" json:"members,omitempty"` // resolved pool size; 0 => nothing to pick, master fails closed
+	Nodes         []string               `protobuf:"bytes,5,rep,name=nodes,proto3" json:"nodes,omitempty"`      // every member the leastLoad balancer spreads over, best first
+	Alive         int32                  `protobuf:"varint,6,opt,name=alive,proto3" json:"alive,omitempty"`     // members whose latest pings succeed; -1 = unknown
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -518,6 +520,20 @@ func (x *WinnerInfo) GetTag() string {
 func (x *WinnerInfo) GetMembers() int32 {
 	if x != nil {
 		return x.Members
+	}
+	return 0
+}
+
+func (x *WinnerInfo) GetNodes() []string {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *WinnerInfo) GetAlive() int32 {
+	if x != nil {
+		return x.Alive
 	}
 	return 0
 }
@@ -1419,6 +1435,8 @@ type NodeInfo struct {
 	Active        bool                   `protobuf:"varint,3,opt,name=active,proto3" json:"active,omitempty"`
 	Disabled      bool                   `protobuf:"varint,4,opt,name=disabled,proto3" json:"disabled,omitempty"`
 	LatencyMs     int32                  `protobuf:"varint,5,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
+	ParkedUntil   int64                  `protobuf:"varint,6,opt,name=parked_until,json=parkedUntil,proto3" json:"parked_until,omitempty"` // unix seconds; non-zero => dead node left out of its pool until then
+	Rejected      string                 `protobuf:"bytes,7,opt,name=rejected,proto3" json:"rejected,omitempty"`                           // non-empty => xray refuses this node's config (the reason); left out of its pool
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1486,6 +1504,20 @@ func (x *NodeInfo) GetLatencyMs() int32 {
 		return x.LatencyMs
 	}
 	return 0
+}
+
+func (x *NodeInfo) GetParkedUntil() int64 {
+	if x != nil {
+		return x.ParkedUntil
+	}
+	return 0
+}
+
+func (x *NodeInfo) GetRejected() string {
+	if x != nil {
+		return x.Rejected
+	}
+	return ""
 }
 
 type SubNodesReply struct {
@@ -2156,6 +2188,11 @@ type XrayState struct {
 	HealthMessage   string                 `protobuf:"bytes,7,opt,name=health_message,json=healthMessage,proto3" json:"health_message,omitempty"`
 	HealthRestarts  int32                  `protobuf:"varint,8,opt,name=health_restarts,json=healthRestarts,proto3" json:"health_restarts,omitempty"`
 	LastHealthCheck int64                  `protobuf:"varint,9,opt,name=last_health_check,json=lastHealthCheck,proto3" json:"last_health_check,omitempty"`
+	ConfigRestarts  int32                  `protobuf:"varint,10,opt,name=config_restarts,json=configRestarts,proto3" json:"config_restarts,omitempty"` // config changes that needed a restart (each dropped every connection)
+	LiveApplies     int32                  `protobuf:"varint,11,opt,name=live_applies,json=liveApplies,proto3" json:"live_applies,omitempty"`          // config changes applied through the api, no restart
+	ParkedNodes     int32                  `protobuf:"varint,12,opt,name=parked_nodes,json=parkedNodes,proto3" json:"parked_nodes,omitempty"`          // dead pool nodes currently left out of their pools
+	ConfigError     string                 `protobuf:"bytes,13,opt,name=config_error,json=configError,proto3" json:"config_error,omitempty"`           // why the last generated config was refused ("" = applied)
+	RejectedNodes   int32                  `protobuf:"varint,14,opt,name=rejected_nodes,json=rejectedNodes,proto3" json:"rejected_nodes,omitempty"`    // pool nodes xray refuses, left out of their pools
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2249,6 +2286,41 @@ func (x *XrayState) GetHealthRestarts() int32 {
 func (x *XrayState) GetLastHealthCheck() int64 {
 	if x != nil {
 		return x.LastHealthCheck
+	}
+	return 0
+}
+
+func (x *XrayState) GetConfigRestarts() int32 {
+	if x != nil {
+		return x.ConfigRestarts
+	}
+	return 0
+}
+
+func (x *XrayState) GetLiveApplies() int32 {
+	if x != nil {
+		return x.LiveApplies
+	}
+	return 0
+}
+
+func (x *XrayState) GetParkedNodes() int32 {
+	if x != nil {
+		return x.ParkedNodes
+	}
+	return 0
+}
+
+func (x *XrayState) GetConfigError() string {
+	if x != nil {
+		return x.ConfigError
+	}
+	return ""
+}
+
+func (x *XrayState) GetRejectedNodes() int32 {
+	if x != nil {
+		return x.RejectedNodes
 	}
 	return 0
 }
@@ -2740,6 +2812,7 @@ type EntryAddRequest struct {
 	OutboundJson  string                 `protobuf:"bytes,3,opt,name=outbound_json,json=outboundJson,proto3" json:"outbound_json,omitempty"` // raw outbound JSON (alternative to link)
 	Dialer        string                 `protobuf:"bytes,4,opt,name=dialer,proto3" json:"dialer,omitempty"`                                 // non-empty => master
 	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Mux           bool                   `protobuf:"varint,6,opt,name=mux,proto3" json:"mux,omitempty"` // opt the outbound into mux.cool (where supported)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2809,6 +2882,13 @@ func (x *EntryAddRequest) GetEnabled() bool {
 	return false
 }
 
+func (x *EntryAddRequest) GetMux() bool {
+	if x != nil {
+		return x.Mux
+	}
+	return false
+}
+
 type EntryInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -2816,6 +2896,8 @@ type EntryInfo struct {
 	Enabled       bool                   `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	IsMaster      bool                   `protobuf:"varint,4,opt,name=is_master,json=isMaster,proto3" json:"is_master,omitempty"`
 	Dialer        string                 `protobuf:"bytes,5,opt,name=dialer,proto3" json:"dialer,omitempty"`
+	Mux           bool                   `protobuf:"varint,6,opt,name=mux,proto3" json:"mux,omitempty"`                       // stored mux opt-in
+	MuxNote       string                 `protobuf:"bytes,7,opt,name=mux_note,json=muxNote,proto3" json:"mux_note,omitempty"` // why mux can't apply to this outbound ("" = it can)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2881,6 +2963,20 @@ func (x *EntryInfo) GetIsMaster() bool {
 func (x *EntryInfo) GetDialer() string {
 	if x != nil {
 		return x.Dialer
+	}
+	return ""
+}
+
+func (x *EntryInfo) GetMux() bool {
+	if x != nil {
+		return x.Mux
+	}
+	return false
+}
+
+func (x *EntryInfo) GetMuxNote() string {
+	if x != nil {
+		return x.MuxNote
 	}
 	return ""
 }
@@ -3610,13 +3706,15 @@ const file_emx_proto_rawDesc = "" +
 	"\bnew_name\x18\x02 \x01(\tR\anewName\"=\n" +
 	"\x11SetEnabledRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x18\n" +
-	"\aenabled\x18\x02 \x01(\bR\aenabled\"d\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\"\x90\x01\n" +
 	"\n" +
 	"WinnerInfo\x12\x16\n" +
 	"\x06master\x18\x01 \x01(\tR\x06master\x12\x12\n" +
 	"\x04node\x18\x02 \x01(\tR\x04node\x12\x10\n" +
 	"\x03tag\x18\x03 \x01(\tR\x03tag\x12\x18\n" +
-	"\amembers\x18\x04 \x01(\x05R\amembers\"<\n" +
+	"\amembers\x18\x04 \x01(\x05R\amembers\x12\x14\n" +
+	"\x05nodes\x18\x05 \x03(\tR\x05nodes\x12\x14\n" +
+	"\x05alive\x18\x06 \x01(\x05R\x05alive\"<\n" +
 	"\fWinnersReply\x12,\n" +
 	"\awinners\x18\x01 \x03(\v2\x12.emx.v1.WinnerInfoR\awinners\"/\n" +
 	"\x0eTrafficRequest\x12\x1d\n" +
@@ -3688,14 +3786,16 @@ const file_emx_proto_rawDesc = "" +
 	"\x0fSubRefreshReply\x12\x14\n" +
 	"\x05nodes\x18\x01 \x01(\x05R\x05nodes\x12\x14\n" +
 	"\x05added\x18\x02 \x01(\x05R\x05added\x12\x18\n" +
-	"\aremoved\x18\x03 \x01(\x05R\aremoved\"\x93\x01\n" +
+	"\aremoved\x18\x03 \x01(\x05R\aremoved\"\xd2\x01\n" +
 	"\bNodeInfo\x12 \n" +
 	"\vfingerprint\x18\x01 \x01(\tR\vfingerprint\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06active\x18\x03 \x01(\bR\x06active\x12\x1a\n" +
 	"\bdisabled\x18\x04 \x01(\bR\bdisabled\x12\x1d\n" +
 	"\n" +
-	"latency_ms\x18\x05 \x01(\x05R\tlatencyMs\"7\n" +
+	"latency_ms\x18\x05 \x01(\x05R\tlatencyMs\x12!\n" +
+	"\fparked_until\x18\x06 \x01(\x03R\vparkedUntil\x12\x1a\n" +
+	"\brejected\x18\a \x01(\tR\brejected\"7\n" +
 	"\rSubNodesReply\x12&\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x10.emx.v1.NodeInfoR\x05nodes\"m\n" +
 	"\x16SubNodeDisabledRequest\x12\x15\n" +
@@ -3733,7 +3833,7 @@ const file_emx_proto_rawDesc = "" +
 	"uptime_sec\x18\x02 \x01(\x03R\tuptimeSec\x12%\n" +
 	"\x04xray\x18\x03 \x01(\v2\x11.emx.v1.XrayStateR\x04xray\x12%\n" +
 	"\x0elatest_version\x18\x04 \x01(\tR\rlatestVersion\x12)\n" +
-	"\x10update_available\x18\x05 \x01(\bR\x0fupdateAvailable\"\xb5\x02\n" +
+	"\x10update_available\x18\x05 \x01(\bR\x0fupdateAvailable\"\xee\x03\n" +
 	"\tXrayState\x12\x18\n" +
 	"\arunning\x18\x01 \x01(\bR\arunning\x12\x10\n" +
 	"\x03pid\x18\x02 \x01(\x05R\x03pid\x12\x1a\n" +
@@ -3746,7 +3846,13 @@ const file_emx_proto_rawDesc = "" +
 	"responsive\x12%\n" +
 	"\x0ehealth_message\x18\a \x01(\tR\rhealthMessage\x12'\n" +
 	"\x0fhealth_restarts\x18\b \x01(\x05R\x0ehealthRestarts\x12*\n" +
-	"\x11last_health_check\x18\t \x01(\x03R\x0flastHealthCheck\"\x11\n" +
+	"\x11last_health_check\x18\t \x01(\x03R\x0flastHealthCheck\x12'\n" +
+	"\x0fconfig_restarts\x18\n" +
+	" \x01(\x05R\x0econfigRestarts\x12!\n" +
+	"\flive_applies\x18\v \x01(\x05R\vliveApplies\x12!\n" +
+	"\fparked_nodes\x18\f \x01(\x05R\vparkedNodes\x12!\n" +
+	"\fconfig_error\x18\r \x01(\tR\vconfigError\x12%\n" +
+	"\x0erejected_nodes\x18\x0e \x01(\x05R\rrejectedNodes\"\x11\n" +
 	"\x0fShutdownRequest\"\x0f\n" +
 	"\rShutdownReply\"#\n" +
 	"\x0fLogLevelRequest\x12\x10\n" +
@@ -3770,19 +3876,22 @@ const file_emx_proto_rawDesc = "" +
 	"\anetwork\x18\x04 \x01(\tR\anetwork\x12\x1a\n" +
 	"\bsecurity\x18\x05 \x01(\tR\bsecurity\"C\n" +
 	"\x11TemplateListReply\x12.\n" +
-	"\ttemplates\x18\x01 \x03(\v2\x10.emx.v1.TemplateR\ttemplates\"\x90\x01\n" +
+	"\ttemplates\x18\x01 \x03(\v2\x10.emx.v1.TemplateR\ttemplates\"\xa2\x01\n" +
 	"\x0fEntryAddRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04link\x18\x02 \x01(\tR\x04link\x12#\n" +
 	"\routbound_json\x18\x03 \x01(\tR\foutboundJson\x12\x16\n" +
 	"\x06dialer\x18\x04 \x01(\tR\x06dialer\x12\x18\n" +
-	"\aenabled\x18\x05 \x01(\bR\aenabled\"~\n" +
+	"\aenabled\x18\x05 \x01(\bR\aenabled\x12\x10\n" +
+	"\x03mux\x18\x06 \x01(\bR\x03mux\"\xab\x01\n" +
 	"\tEntryInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aenabled\x18\x03 \x01(\bR\aenabled\x12\x1b\n" +
 	"\tis_master\x18\x04 \x01(\bR\bisMaster\x12\x16\n" +
-	"\x06dialer\x18\x05 \x01(\tR\x06dialer\"5\n" +
+	"\x06dialer\x18\x05 \x01(\tR\x06dialer\x12\x10\n" +
+	"\x03mux\x18\x06 \x01(\bR\x03mux\x12\x19\n" +
+	"\bmux_note\x18\a \x01(\tR\amuxNote\"5\n" +
 	"\n" +
 	"EntryReply\x12'\n" +
 	"\x05entry\x18\x01 \x01(\v2\x11.emx.v1.EntryInfoR\x05entry\"=\n" +
@@ -3842,7 +3951,7 @@ const file_emx_proto_rawDesc = "" +
 	"\x10InboundUserReply\x12$\n" +
 	"\x04user\x18\x01 \x01(\v2\x10.emx.v1.UserInfoR\x04user\">\n" +
 	"\x14InboundUserListReply\x12&\n" +
-	"\x05users\x18\x01 \x03(\v2\x10.emx.v1.UserInfoR\x05users2\x9f\x13\n" +
+	"\x05users\x18\x01 \x03(\v2\x10.emx.v1.UserInfoR\x05users2\xdd\x13\n" +
 	"\x06Daemon\x12.\n" +
 	"\x04Ping\x12\x13.emx.v1.PingRequest\x1a\x11.emx.v1.PingReply\x124\n" +
 	"\x06Status\x12\x15.emx.v1.StatusRequest\x1a\x13.emx.v1.StatusReply\x12:\n" +
@@ -3861,7 +3970,8 @@ const file_emx_proto_rawDesc = "" +
 	"\vEntryRename\x12\x15.emx.v1.RenameRequest\x1a\r.emx.v1.Empty\x12>\n" +
 	"\x0eEntryDuplicate\x12\x18.emx.v1.DuplicateRequest\x1a\x12.emx.v1.EntryReply\x128\n" +
 	"\x0eEntryGetConfig\x12\x11.emx.v1.IdRequest\x1a\x13.emx.v1.ConfigReply\x12>\n" +
-	"\x0eEntrySetConfig\x12\x18.emx.v1.SetConfigRequest\x1a\x12.emx.v1.EntryReply\x12=\n" +
+	"\x0eEntrySetConfig\x12\x18.emx.v1.SetConfigRequest\x1a\x12.emx.v1.EntryReply\x12<\n" +
+	"\vEntrySetMux\x12\x19.emx.v1.SetEnabledRequest\x1a\x12.emx.v1.EntryReply\x12=\n" +
 	"\n" +
 	"InboundAdd\x12\x19.emx.v1.InboundAddRequest\x1a\x14.emx.v1.InboundReply\x126\n" +
 	"\vInboundList\x12\r.emx.v1.Empty\x1a\x18.emx.v1.InboundListReply\x121\n" +
@@ -3998,75 +4108,77 @@ var file_emx_proto_depIdxs = []int32{
 	27, // 30: emx.v1.Daemon.EntryDuplicate:input_type -> emx.v1.DuplicateRequest
 	26, // 31: emx.v1.Daemon.EntryGetConfig:input_type -> emx.v1.IdRequest
 	29, // 32: emx.v1.Daemon.EntrySetConfig:input_type -> emx.v1.SetConfigRequest
-	51, // 33: emx.v1.Daemon.InboundAdd:input_type -> emx.v1.InboundAddRequest
-	25, // 34: emx.v1.Daemon.InboundList:input_type -> emx.v1.Empty
-	26, // 35: emx.v1.Daemon.InboundRemove:input_type -> emx.v1.IdRequest
-	27, // 36: emx.v1.Daemon.InboundDuplicate:input_type -> emx.v1.DuplicateRequest
-	26, // 37: emx.v1.Daemon.InboundGetConfig:input_type -> emx.v1.IdRequest
-	29, // 38: emx.v1.Daemon.InboundSetConfig:input_type -> emx.v1.SetConfigRequest
-	55, // 39: emx.v1.Daemon.InboundUserAdd:input_type -> emx.v1.InboundUserAddRequest
-	26, // 40: emx.v1.Daemon.InboundUserList:input_type -> emx.v1.IdRequest
-	26, // 41: emx.v1.Daemon.InboundUserRemove:input_type -> emx.v1.IdRequest
-	6,  // 42: emx.v1.Daemon.InboundUserSetEnabled:input_type -> emx.v1.SetEnabledRequest
-	25, // 43: emx.v1.Daemon.Winners:input_type -> emx.v1.Empty
-	9,  // 44: emx.v1.Daemon.Traffic:input_type -> emx.v1.TrafficRequest
-	25, // 45: emx.v1.Daemon.TrafficLive:input_type -> emx.v1.Empty
-	14, // 46: emx.v1.Daemon.TrafficRetention:input_type -> emx.v1.TrafficRetentionRequest
-	25, // 47: emx.v1.Daemon.ExportConfig:input_type -> emx.v1.Empty
-	30, // 48: emx.v1.Daemon.ImportConfig:input_type -> emx.v1.ImportRequest
-	16, // 49: emx.v1.Daemon.SubAdd:input_type -> emx.v1.SubAddRequest
-	25, // 50: emx.v1.Daemon.SubList:input_type -> emx.v1.Empty
-	26, // 51: emx.v1.Daemon.SubRemove:input_type -> emx.v1.IdRequest
-	6,  // 52: emx.v1.Daemon.SubSetEnabled:input_type -> emx.v1.SetEnabledRequest
-	20, // 53: emx.v1.Daemon.SubRefresh:input_type -> emx.v1.SubRefreshRequest
-	26, // 54: emx.v1.Daemon.SubNodes:input_type -> emx.v1.IdRequest
-	24, // 55: emx.v1.Daemon.SubSetNodeDisabled:input_type -> emx.v1.SubNodeDisabledRequest
-	5,  // 56: emx.v1.Daemon.SubRename:input_type -> emx.v1.RenameRequest
-	4,  // 57: emx.v1.Daemon.SubSetOptions:input_type -> emx.v1.SubOptionsRequest
-	33, // 58: emx.v1.Daemon.Ping:output_type -> emx.v1.PingReply
-	35, // 59: emx.v1.Daemon.Status:output_type -> emx.v1.StatusReply
-	38, // 60: emx.v1.Daemon.Shutdown:output_type -> emx.v1.ShutdownReply
-	0,  // 61: emx.v1.Daemon.XrayRestart:output_type -> emx.v1.XrayRestartReply
-	3,  // 62: emx.v1.Daemon.Test:output_type -> emx.v1.TestReply
-	28, // 63: emx.v1.Daemon.XrayConfig:output_type -> emx.v1.ConfigReply
-	40, // 64: emx.v1.Daemon.LogLevel:output_type -> emx.v1.LogLevelReply
-	44, // 65: emx.v1.Daemon.LogCap:output_type -> emx.v1.LogCapReply
-	42, // 66: emx.v1.Daemon.ProbeInterval:output_type -> emx.v1.ProbeIntervalReply
-	46, // 67: emx.v1.Daemon.TemplateList:output_type -> emx.v1.TemplateListReply
-	49, // 68: emx.v1.Daemon.EntryAdd:output_type -> emx.v1.EntryReply
-	50, // 69: emx.v1.Daemon.EntryList:output_type -> emx.v1.EntryListReply
-	25, // 70: emx.v1.Daemon.EntryRemove:output_type -> emx.v1.Empty
-	25, // 71: emx.v1.Daemon.EntryRename:output_type -> emx.v1.Empty
-	49, // 72: emx.v1.Daemon.EntryDuplicate:output_type -> emx.v1.EntryReply
-	28, // 73: emx.v1.Daemon.EntryGetConfig:output_type -> emx.v1.ConfigReply
-	49, // 74: emx.v1.Daemon.EntrySetConfig:output_type -> emx.v1.EntryReply
-	53, // 75: emx.v1.Daemon.InboundAdd:output_type -> emx.v1.InboundReply
-	54, // 76: emx.v1.Daemon.InboundList:output_type -> emx.v1.InboundListReply
-	25, // 77: emx.v1.Daemon.InboundRemove:output_type -> emx.v1.Empty
-	53, // 78: emx.v1.Daemon.InboundDuplicate:output_type -> emx.v1.InboundReply
-	28, // 79: emx.v1.Daemon.InboundGetConfig:output_type -> emx.v1.ConfigReply
-	53, // 80: emx.v1.Daemon.InboundSetConfig:output_type -> emx.v1.InboundReply
-	57, // 81: emx.v1.Daemon.InboundUserAdd:output_type -> emx.v1.InboundUserReply
-	58, // 82: emx.v1.Daemon.InboundUserList:output_type -> emx.v1.InboundUserListReply
-	25, // 83: emx.v1.Daemon.InboundUserRemove:output_type -> emx.v1.Empty
-	25, // 84: emx.v1.Daemon.InboundUserSetEnabled:output_type -> emx.v1.Empty
-	8,  // 85: emx.v1.Daemon.Winners:output_type -> emx.v1.WinnersReply
-	11, // 86: emx.v1.Daemon.Traffic:output_type -> emx.v1.TrafficReply
-	13, // 87: emx.v1.Daemon.TrafficLive:output_type -> emx.v1.TrafficLiveReply
-	15, // 88: emx.v1.Daemon.TrafficRetention:output_type -> emx.v1.TrafficRetentionReply
-	28, // 89: emx.v1.Daemon.ExportConfig:output_type -> emx.v1.ConfigReply
-	31, // 90: emx.v1.Daemon.ImportConfig:output_type -> emx.v1.ImportReply
-	18, // 91: emx.v1.Daemon.SubAdd:output_type -> emx.v1.SubReply
-	19, // 92: emx.v1.Daemon.SubList:output_type -> emx.v1.SubListReply
-	25, // 93: emx.v1.Daemon.SubRemove:output_type -> emx.v1.Empty
-	25, // 94: emx.v1.Daemon.SubSetEnabled:output_type -> emx.v1.Empty
-	21, // 95: emx.v1.Daemon.SubRefresh:output_type -> emx.v1.SubRefreshReply
-	23, // 96: emx.v1.Daemon.SubNodes:output_type -> emx.v1.SubNodesReply
-	25, // 97: emx.v1.Daemon.SubSetNodeDisabled:output_type -> emx.v1.Empty
-	25, // 98: emx.v1.Daemon.SubRename:output_type -> emx.v1.Empty
-	18, // 99: emx.v1.Daemon.SubSetOptions:output_type -> emx.v1.SubReply
-	58, // [58:100] is the sub-list for method output_type
-	16, // [16:58] is the sub-list for method input_type
+	6,  // 33: emx.v1.Daemon.EntrySetMux:input_type -> emx.v1.SetEnabledRequest
+	51, // 34: emx.v1.Daemon.InboundAdd:input_type -> emx.v1.InboundAddRequest
+	25, // 35: emx.v1.Daemon.InboundList:input_type -> emx.v1.Empty
+	26, // 36: emx.v1.Daemon.InboundRemove:input_type -> emx.v1.IdRequest
+	27, // 37: emx.v1.Daemon.InboundDuplicate:input_type -> emx.v1.DuplicateRequest
+	26, // 38: emx.v1.Daemon.InboundGetConfig:input_type -> emx.v1.IdRequest
+	29, // 39: emx.v1.Daemon.InboundSetConfig:input_type -> emx.v1.SetConfigRequest
+	55, // 40: emx.v1.Daemon.InboundUserAdd:input_type -> emx.v1.InboundUserAddRequest
+	26, // 41: emx.v1.Daemon.InboundUserList:input_type -> emx.v1.IdRequest
+	26, // 42: emx.v1.Daemon.InboundUserRemove:input_type -> emx.v1.IdRequest
+	6,  // 43: emx.v1.Daemon.InboundUserSetEnabled:input_type -> emx.v1.SetEnabledRequest
+	25, // 44: emx.v1.Daemon.Winners:input_type -> emx.v1.Empty
+	9,  // 45: emx.v1.Daemon.Traffic:input_type -> emx.v1.TrafficRequest
+	25, // 46: emx.v1.Daemon.TrafficLive:input_type -> emx.v1.Empty
+	14, // 47: emx.v1.Daemon.TrafficRetention:input_type -> emx.v1.TrafficRetentionRequest
+	25, // 48: emx.v1.Daemon.ExportConfig:input_type -> emx.v1.Empty
+	30, // 49: emx.v1.Daemon.ImportConfig:input_type -> emx.v1.ImportRequest
+	16, // 50: emx.v1.Daemon.SubAdd:input_type -> emx.v1.SubAddRequest
+	25, // 51: emx.v1.Daemon.SubList:input_type -> emx.v1.Empty
+	26, // 52: emx.v1.Daemon.SubRemove:input_type -> emx.v1.IdRequest
+	6,  // 53: emx.v1.Daemon.SubSetEnabled:input_type -> emx.v1.SetEnabledRequest
+	20, // 54: emx.v1.Daemon.SubRefresh:input_type -> emx.v1.SubRefreshRequest
+	26, // 55: emx.v1.Daemon.SubNodes:input_type -> emx.v1.IdRequest
+	24, // 56: emx.v1.Daemon.SubSetNodeDisabled:input_type -> emx.v1.SubNodeDisabledRequest
+	5,  // 57: emx.v1.Daemon.SubRename:input_type -> emx.v1.RenameRequest
+	4,  // 58: emx.v1.Daemon.SubSetOptions:input_type -> emx.v1.SubOptionsRequest
+	33, // 59: emx.v1.Daemon.Ping:output_type -> emx.v1.PingReply
+	35, // 60: emx.v1.Daemon.Status:output_type -> emx.v1.StatusReply
+	38, // 61: emx.v1.Daemon.Shutdown:output_type -> emx.v1.ShutdownReply
+	0,  // 62: emx.v1.Daemon.XrayRestart:output_type -> emx.v1.XrayRestartReply
+	3,  // 63: emx.v1.Daemon.Test:output_type -> emx.v1.TestReply
+	28, // 64: emx.v1.Daemon.XrayConfig:output_type -> emx.v1.ConfigReply
+	40, // 65: emx.v1.Daemon.LogLevel:output_type -> emx.v1.LogLevelReply
+	44, // 66: emx.v1.Daemon.LogCap:output_type -> emx.v1.LogCapReply
+	42, // 67: emx.v1.Daemon.ProbeInterval:output_type -> emx.v1.ProbeIntervalReply
+	46, // 68: emx.v1.Daemon.TemplateList:output_type -> emx.v1.TemplateListReply
+	49, // 69: emx.v1.Daemon.EntryAdd:output_type -> emx.v1.EntryReply
+	50, // 70: emx.v1.Daemon.EntryList:output_type -> emx.v1.EntryListReply
+	25, // 71: emx.v1.Daemon.EntryRemove:output_type -> emx.v1.Empty
+	25, // 72: emx.v1.Daemon.EntryRename:output_type -> emx.v1.Empty
+	49, // 73: emx.v1.Daemon.EntryDuplicate:output_type -> emx.v1.EntryReply
+	28, // 74: emx.v1.Daemon.EntryGetConfig:output_type -> emx.v1.ConfigReply
+	49, // 75: emx.v1.Daemon.EntrySetConfig:output_type -> emx.v1.EntryReply
+	49, // 76: emx.v1.Daemon.EntrySetMux:output_type -> emx.v1.EntryReply
+	53, // 77: emx.v1.Daemon.InboundAdd:output_type -> emx.v1.InboundReply
+	54, // 78: emx.v1.Daemon.InboundList:output_type -> emx.v1.InboundListReply
+	25, // 79: emx.v1.Daemon.InboundRemove:output_type -> emx.v1.Empty
+	53, // 80: emx.v1.Daemon.InboundDuplicate:output_type -> emx.v1.InboundReply
+	28, // 81: emx.v1.Daemon.InboundGetConfig:output_type -> emx.v1.ConfigReply
+	53, // 82: emx.v1.Daemon.InboundSetConfig:output_type -> emx.v1.InboundReply
+	57, // 83: emx.v1.Daemon.InboundUserAdd:output_type -> emx.v1.InboundUserReply
+	58, // 84: emx.v1.Daemon.InboundUserList:output_type -> emx.v1.InboundUserListReply
+	25, // 85: emx.v1.Daemon.InboundUserRemove:output_type -> emx.v1.Empty
+	25, // 86: emx.v1.Daemon.InboundUserSetEnabled:output_type -> emx.v1.Empty
+	8,  // 87: emx.v1.Daemon.Winners:output_type -> emx.v1.WinnersReply
+	11, // 88: emx.v1.Daemon.Traffic:output_type -> emx.v1.TrafficReply
+	13, // 89: emx.v1.Daemon.TrafficLive:output_type -> emx.v1.TrafficLiveReply
+	15, // 90: emx.v1.Daemon.TrafficRetention:output_type -> emx.v1.TrafficRetentionReply
+	28, // 91: emx.v1.Daemon.ExportConfig:output_type -> emx.v1.ConfigReply
+	31, // 92: emx.v1.Daemon.ImportConfig:output_type -> emx.v1.ImportReply
+	18, // 93: emx.v1.Daemon.SubAdd:output_type -> emx.v1.SubReply
+	19, // 94: emx.v1.Daemon.SubList:output_type -> emx.v1.SubListReply
+	25, // 95: emx.v1.Daemon.SubRemove:output_type -> emx.v1.Empty
+	25, // 96: emx.v1.Daemon.SubSetEnabled:output_type -> emx.v1.Empty
+	21, // 97: emx.v1.Daemon.SubRefresh:output_type -> emx.v1.SubRefreshReply
+	23, // 98: emx.v1.Daemon.SubNodes:output_type -> emx.v1.SubNodesReply
+	25, // 99: emx.v1.Daemon.SubSetNodeDisabled:output_type -> emx.v1.Empty
+	25, // 100: emx.v1.Daemon.SubRename:output_type -> emx.v1.Empty
+	18, // 101: emx.v1.Daemon.SubSetOptions:output_type -> emx.v1.SubReply
+	59, // [59:102] is the sub-list for method output_type
+	16, // [16:59] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
 	16, // [16:16] is the sub-list for extension extendee
 	0,  // [0:16] is the sub-list for field type_name

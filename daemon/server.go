@@ -62,6 +62,7 @@ func (s *Server) Status(context.Context, *emxv1.StatusRequest) (*emxv1.StatusRep
 	if !checkedAt.IsZero() {
 		checkedUnix = checkedAt.Unix()
 	}
+	cfgRestarts, liveApplies := s.sup.Counters()
 	latest := s.latest()
 	return &emxv1.StatusReply{
 		DaemonPid: int32(os.Getpid()),
@@ -76,6 +77,11 @@ func (s *Server) Status(context.Context, *emxv1.StatusRequest) (*emxv1.StatusRep
 			HealthMessage:   healthMessage,
 			HealthRestarts:  healthRestarts,
 			LastHealthCheck: checkedUnix,
+			ConfigRestarts:  int32(cfgRestarts),
+			LiveApplies:     int32(liveApplies),
+			ParkedNodes:     int32(len(s.sup.ParkedNodes())),
+			ConfigError:     s.sup.ConfigError(),
+			RejectedNodes:   int32(len(s.sup.RejectedMembers())),
 		},
 		LatestVersion:   latest,
 		UpdateAvailable: latest != "" && selfupdate.Newer(buildVersion, latest),

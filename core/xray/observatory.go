@@ -8,6 +8,24 @@ import (
 // slotOutRe matches a slot member outbound tag: slot<idx>-out-<key>.
 var slotOutRe = regexp.MustCompile(`slot(\d+)-out-[A-Za-z0-9_-]+`)
 
+// ParseBalancerSelects extracts every selected member per balancer, in the
+// order xray ranks them (leastLoad selects up to SlotBalancerExpected). Same
+// tag-keyed parsing as ParseBalancerWinners; duplicates are dropped.
+func ParseBalancerSelects(text string) map[string][]string {
+	sel := map[string][]string{}
+	seen := map[string]bool{}
+	for _, m := range slotOutRe.FindAllStringSubmatch(text, -1) {
+		full, idx := m[0], m[1]
+		if seen[full] {
+			continue
+		}
+		seen[full] = true
+		bal := fmt.Sprintf("slot%s-bal", idx)
+		sel[bal] = append(sel[bal], full)
+	}
+	return sel
+}
+
 // ParseBalancerWinners extracts the current winner per balancer from the human
 // text of `xray api bi`. That output is TEXT, not JSON, and exposes only each
 // balancer's selected member — no per-node RTT over the CLI.

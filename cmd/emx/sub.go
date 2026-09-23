@@ -277,15 +277,27 @@ func subNodesCmd() *cobra.Command {
 					return err
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "FINGERPRINT\tNAME\tACTIVE\tDISABLED\tLATENCY")
+				fmt.Fprintln(tw, "FINGERPRINT\tNAME\tACTIVE\tDISABLED\tLATENCY\tSTATE")
 				for _, n := range reply.Nodes {
 					lat := "-"
 					if n.LatencyMs > 0 {
 						lat = strconv.Itoa(int(n.LatencyMs)) + "ms"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%v\t%v\t%s\n", n.Fingerprint, n.Name, n.Active, n.Disabled, lat)
+					state := parkedLabel(n.ParkedUntil)
+					if n.Rejected != "" {
+						state = "REFUSED by xray"
+					}
+					fmt.Fprintf(tw, "%s\t%s\t%v\t%v\t%s\t%s\n", n.Fingerprint, n.Name, n.Active, n.Disabled, lat, state)
 				}
-				return tw.Flush()
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+				for _, n := range reply.Nodes {
+					if n.Rejected != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "\n%s (%s) refused by xray:\n  %s\n", n.Name, n.Fingerprint, n.Rejected)
+					}
+				}
+				return nil
 			})
 		},
 	}
@@ -476,4 +488,13 @@ func roundDur(d time.Duration) string {
 		return d.Round(time.Minute).String()
 	}
 	return d.Round(time.Second).String()
+}
+
+// parkedLabel renders a node's park state: "-" when in its pool, else when
+// the dead node is put back on trial.
+func parkedLabel(until int64) string {
+	if until == 0 {
+		return "-"
+	}
+	return "dead, retry " + time.Unix(until, 0).Format("15:04")
 }

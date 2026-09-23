@@ -142,9 +142,7 @@ func parseHysteria2(link string) (*ParsedLink, error) {
 	if sni := q.Get("sni"); sni != "" {
 		tls["serverName"] = sni
 	}
-	if q.Get("insecure") == "1" || strings.EqualFold(q.Get("insecure"), "true") {
-		tls["allowInsecure"] = true
-	}
+	applyCertPin(tls, q)
 	stream := map[string]any{
 		"network":          "hysteria",
 		"security":         "tls",
@@ -176,6 +174,8 @@ type vmessJSON struct {
 	SNI  string `json:"sni"`
 	ALPN string `json:"alpn"`
 	FP   string `json:"fp"`
+	PCS  string `json:"pcs"` // pinnedPeerCertSha256 (xray v26+)
+	VCN  string `json:"vcn"` // verifyPeerCertByName (xray v26+)
 }
 
 func parseVMess(link string) (*ParsedLink, error) {
@@ -206,6 +206,8 @@ func parseVMess(link string) (*ParsedLink, error) {
 	q.Set("sni", v.SNI)
 	q.Set("fp", v.FP)
 	q.Set("alpn", v.ALPN)
+	q.Set("pcs", v.PCS)
+	q.Set("vcn", v.VCN)
 	q.Set("headerType", v.Type)
 	q.Set("serviceName", v.Path) // grpc carries serviceName in path for vmess links
 	stream := buildStream(q)
@@ -376,10 +378,39 @@ func applyTLS(stream map[string]any, q url.Values, fallbackSNI string) {
 	if alpn := q.Get("alpn"); alpn != "" {
 		tls["alpn"] = splitComma(alpn)
 	}
-	if q.Get("allowInsecure") == "1" || strings.EqualFold(q.Get("allowInsecure"), "true") {
-		tls["allowInsecure"] = true
-	}
+	applyCertPin(tls, q)
 	stream["tlsSettings"] = tls
+}
+
+// applyCertPin carries a link's certificate pinning into tlsSettings. xray
+// v26 removed allowInsecure — a config that carries it is rejected WHOLE, so
+// one such node in a subscription would take every inbound down. Its
+// replacements are pinnedPeerCertSha256 (link param `pcs`; hysteria2's
+// `pinSHA256`) and verifyPeerCertByName (`vcn`). allowInsecure / insecure=1
+// without a pin is dropped: the node then verifies its certificate normally,
+// which works for the many providers that set the flag needlessly, and fails
+// only that node (never xray) for the rest.
+func applyCertPin(tls map[string]any, q url.Values) {
+	if pin := NormalizeCertPin(orDefault(q.Get("pcs"), q.Get("pinSHA256"))); pin != "" {
+		tls["pinnedPeerCertSha256"] = pin
+	}
+	if vcn := q.Get("vcn"); vcn != "" {
+		tls["verifyPeerCertByName"] = vcn
+	}
+}
+
+// NormalizeCertPin turns a certificate fingerprint as found in share links
+// ("AB:CD:…", upper/lower hex, comma-separated list) into xray's form:
+// lowercase hex, comma-separated. "" when nothing usable remains.
+func NormalizeCertPin(s string) string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		p := strings.ToLower(strings.NewReplacer(":", "", " ", "").Replace(part))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 func realitySettings(q url.Values) map[string]any {

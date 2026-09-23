@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -263,7 +264,17 @@ func statusCmd() *cobra.Command {
 			fmt.Fprintf(out, "daemon:  running (pid %d, up %ds)\n", st.DaemonPid, st.UptimeSec)
 			x := st.Xray
 			if x != nil && x.Running {
-				fmt.Fprintf(out, "xray:    running (pid %d, restarts %d)\n", x.Pid, x.Restarts)
+				fmt.Fprintf(out, "xray:    running (pid %d, crash restarts %d)\n", x.Pid, x.Restarts)
+				fmt.Fprintf(out, "config:  %d changes applied live, %d needed a restart\n", x.LiveApplies, x.ConfigRestarts)
+				if x.ConfigError != "" {
+					fmt.Fprintf(out, "config:  LAST CHANGE REFUSED — %s\n", x.ConfigError)
+				}
+				if x.RejectedNodes > 0 {
+					fmt.Fprintf(out, "nodes:   %d pool node(s) refused by xray, left out (emx sub nodes <id> says why)\n", x.RejectedNodes)
+				}
+				if x.ParkedNodes > 0 {
+					fmt.Fprintf(out, "parked:  %d dead pool node(s) left out until retry (emx sub nodes <id>)\n", x.ParkedNodes)
+				}
 				switch {
 				case !x.HealthChecked:
 					fmt.Fprintln(out, "health:  waiting for first responsiveness check")
@@ -301,6 +312,10 @@ func statusCmd() *cobra.Command {
 							fmt.Fprintf(out, "  %s: BLOCKED — pool empty (refresh its subscription or check its dialer)\n", m.Master)
 						case m.Node == "":
 							fmt.Fprintf(out, "  %s: %d members, selecting… (no probe result yet — traffic blocked until one lands)\n", m.Master, m.Members)
+						case m.Alive == 0:
+							fmt.Fprintf(out, "  %s: %d members, NONE answering pings — this box's uplink or the whole pool is down (traffic falls back to the first member)\n", m.Master, m.Members)
+						case len(m.Nodes) > 0:
+							fmt.Fprintf(out, "  %s: %s alive, via %s\n", m.Master, aliveLabel(m), strings.Join(m.Nodes, ", "))
 						default:
 							fmt.Fprintf(out, "  %s: %d members, via %s\n", m.Master, m.Members, m.Node)
 						}

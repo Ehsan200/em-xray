@@ -11,7 +11,7 @@ Two jobs:
 
 ```
 your client ──vless/reality──▶ emx inbound ──▶ master ──dialerProxy──▶ fastest node ──▶ internet
-                                                         (leastPing balancer + observatory)
+                                              (leastLoad over best 2 + burst observatory)
 ```
 
 The xray binary and geo data are embedded. Interactive menus: run any command group bare (`emx`,
@@ -77,7 +77,7 @@ sudo emx entry add mymaster \
 sudo emx in add gate --to master:mymaster       # 3. listener for your devices → prints vless://…
 
 sudo emx in qr 1                                # link as a QR code
-sudo emx winner                                 # current fastest node per master
+sudo emx winner                                 # nodes each master currently spreads over
 sudo emx traffic                                # per-inbound/outbound charts
 sudo emx speed                                  # live ↑/↓ throughput
 ```
@@ -173,13 +173,16 @@ EMX_PROXY=tg EMX_PROXY_USER=alice EMX_PROXY_PASS=s3cret sudo -E emx update
 | **Entry** | An outbound — a remote server this box dials. Needs an inbound to feed it traffic. |
 | **Master** | An entry with a `Dialer`: its transport tunnels through a node pool via `dialerProxy`. |
 | **Subscription** | A URL yielding a volatile pool of nodes. Only usable inside a master's dialer. |
-| **Node** | One pool member, ranked fastest-first by the observatory. Never listens on a port. |
+| **Node** | One pool member, ranked by the burst observatory's rolling pings. Never listens on a port. |
 | **Inbound** | A listener you expose, routed to a **Target**. |
 | **User** | An extra client on an inbound — own credential/link, own traffic, optional byte cap. |
 | **Target** | `master:NAME` (fastest node) · `xray:NAME` (one entry) · `direct` (this server's IP). |
 
 Dialer refs, comma-separated: `xray:NAME`, `xraysub:NAME` (`proxy:NAME` not supported). A master may
-mix refs; each master gets its own slot + balancer.
+mix refs. Masters naming the same refs (in any order) share one slot — one balancer, one set of
+member outbounds, one set of probes — so probe cost scales with unique pools, not masters. Each
+still keeps its own `dialer-<master>` outbound. Past 32 unique pools a master's dialer is pointed at
+the blackhole (fails closed) rather than dialing off this box.
 
 ---
 
@@ -198,7 +201,8 @@ emx sub nodes <id>                          fingerprint, active, disabled, laten
 emx sub node-enable | node-disable <subid> <fingerprint>    durable across refreshes
 emx sub test <id> [fingerprint]             real latency per node (persisted)
 
-emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>]
+emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>] [--mux]
+emx entry mux <id> on|off                   multiplex streams over a few tunnels (per entry)
 emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
 emx entry test [id]
 
@@ -216,7 +220,7 @@ emx config export [-o file] | import <file> [--replace]
 emx xray config | logs [-a] [-n N] [-f] | logcap [MB] | paths | restart
 emx xray reap                               stop orphaned xray left by a killed daemon
 emx loglevel [debug|info|warning|error|none]
-emx probe-interval [seconds]                observatory cadence (default 60)
+emx probe-interval [seconds]                observatory ping cadence (default 10)
 
 emx caddy install | print | domains | apply | enable | disable | status
 emx template ls | winner | ui
@@ -226,8 +230,17 @@ Run any group without a subcommand on a terminal for its menu; on a pipe it prin
 
 ### Templates
 
-REALITY keypairs, self-signed certs (`xray tls cert`, no domain needed — the link carries
-`allowInsecure`), UUIDs and shortIds are all generated. `emx template ls` for the live list.
+REALITY keypairs, self-signed certs (`xray tls cert`, no domain needed), UUIDs and shortIds are all
+generated. `emx template ls` for the live list.
+
+Self-signed links **pin the certificate**: `pcs=<sha256>` (xray v26+ `pinnedPeerCertSha256`; hysteria2
+`pinSHA256`), plus `allowInsecure=1` / `insecure=1` for clients on an older core. xray v26 refuses a
+config that contains `allowInsecure` at all, so emx never puts it in one: links you import are
+parsed to `pcs`/`vcn` pinning, and a link with only `allowInsecure` verifies its certificate
+normally. Every template's own link is tested end to end against the real xray.
+
+A REALITY inbound borrows its `dest` server's TLS handshake on every connection, so the box must be
+able to reach it (default `www.microsoft.com:443`); if it can't, every REALITY connection fails.
 
 | Name | Transport | Security |
 |---|---|---|
@@ -255,33 +268,66 @@ master outbound
   sockopt.dialerProxy → "dialer-<master>"      (stable socks outbound)
     → 127.0.0.1:<slotPort>                     (slot socks inbound)
       → routing: slotN-in → balancerTag slotN-bal
-        → leastPing picks among slotN-out-<key> members → the node outbound
+        → leastLoad spreads over the best 2 slotN-out-<key> members → the node outbound
 ```
 
 Members share the `slotN-out-` tag **prefix**, so the balancer and the shared observatory adopt
-live-added members with no reload — that's the zero-restart trick. A refresh diffs the pool and
-applies the delta with `xray api ado/rmo`; only a change to the *set* of masters regenerates the
-config, and a reconcile producing a byte-identical config leaves xray alone.
+live-added members with no reload. A pool keeps its slot index across changes, so adding a master
+never renumbers another pool's slot.
+
+**xray is restarted only when unavoidable.** Every change — adding/editing/removing an entry,
+inbound, user or master, a subscription refresh, a node toggle — regenerates the config, diffs it
+against the one xray is running, and applies the difference through the api: inbounds/outbounds
+replaced by tag (`adi`/`rmi`/`ado`/`rmo`), routing rules + balancers swapped whole (`adrules`).
+Connections through anything that didn't change are untouched. A restart happens only when:
+
+- a section the api can't change differs (log level, probe interval, policy, stats, metrics);
+- a client credential is **revoked** (user disabled/removed/over quota, password or UUID changed,
+  authenticated inbound removed) — xray keeps sessions an inbound already accepted across an api
+  replace, so only a restart actually cuts the revoked client off;
+- or an api call fails (the restart converges from any partial state).
+
+`emx status` shows how many changes went live vs. needed a restart.
 
 ### Fail closed, never direct
 
-An inbound routed through a master must never egress from this box's IP. Four rules:
+An inbound routed through a master must never egress from this box's IP. The rules:
 
 - `block` is `outbounds[0]`, so any routing miss hits a blackhole (xray's default handler).
-- Every balancer has `fallbackTag: "block"` — `leastPing` picks nothing until the first probe lands.
+- A pool member must be a proxy protocol (vless, vmess, trojan, shadowsocks, socks, http, hysteria,
+  wireguard). A `freedom` entry is refused as a dialer ref and dropped from a pool if edited later.
+- Each balancer falls back to the pool's **first member** while `leastLoad` has nothing ranked (right
+  after a start, or when every recent ping failed) — so a restart doesn't black out masters until
+  the first ping — and to `block` only when the pool is empty.
 - An enabled master always gets a slot, even with zero members, so the `dialerProxy` hop never
   disappears.
-- Live member sync adds before it removes, so a full pool rotation is never empty mid-flight.
+- A live apply adds before it removes, so a full pool rotation is never empty mid-flight, and takes
+  a master down before replacing its `dialer-<master>` outbound (bringing it back after), so a master
+  never exists without its dialer hop.
 
-`emx status` and `emx winner` report pool size and the current pick; `emx in ls` marks the inbounds
-that legitimately use this server's IP. The blackout after a restart lasts until the first probe
-lands — `emx probe-interval 15` shortens it (5–3600s).
+`emx status` and `emx winner` report how many pool members answer pings and which ones the master
+is spread over; `emx in ls` marks the inbounds
+that legitimately use this server's IP. The burst observatory pings every member every 10s (window
+of 3, 5s timeout) and `leastLoad` drops a failing node on its next ping; `emx probe-interval`
+changes the cadence (5–3600s).
 
 ### Health, testing, accounting
+
+- **xray checks every config before it is applied** (`xray run -test`). A pool node it refuses
+  (a field this xray version rejects, a broken transport) is left out of its pool with xray's reason
+  — `emx sub nodes <id>` shows it — and everything else applies. Any other refused change (an entry,
+  an inbound) is not applied at all: the running xray keeps serving, and `emx status` plus the
+  command's error name the object and the reason.
 
 - **Watchdog** restarts a crashed xray with backoff. Separately the daemon calls xray's local stats
   API every 30s and force-restarts after three consecutive failures; `emx status` shows
   `health: responsive` and the health-restart count.
+- **Dead nodes are parked.** xray's metrics endpoint (loopback, from `11933`) exposes the burst
+  observatory's per-node pings; every 30s the daemon reads it, and a node whose every ping failed
+  for 15 min is left out of its pool (a live outbound removal). It returns on trial after 30 min,
+  doubling per failed trial up to 6h; one good ping clears its record. Never parked without a live
+  sibling in the same pool (all-dead = this box's uplink) and never the last member. In memory
+  only. `emx sub nodes <id>` shows parked nodes, `emx status` the count.
 - **No orphans**: the xray child gets `Pdeathsig`, so a SIGKILLed or OOM-killed daemon takes it down
   too. Any orphan that predates this is reaped when the daemon starts and by `emx update` /
   `emx restart`; `emx xray reap` does it on demand. Orphans matter because the listeners share the
@@ -291,6 +337,14 @@ lands — `emx probe-interval 15` shortens it (5–3600s).
   socks inbound per config on ephemeral loopback ports (a master's `dialerProxy` hop is stripped) and
   the probe URL is fetched through each concurrently, in batches of 24 with halving retry. Results
   persist per fingerprint. Different measurement from `emx winner`, which is the observatory's.
+- **Mux (opt-in per entry)**: `emx entry mux <id> on` turns connections through that entry into
+  streams inside a few long-lived tunnels (no fresh handshake per connection; shared fate if a
+  tunnel breaks). Applied only to VMess, VLESS without an XTLS flow, and Trojan over
+  non-multiplexing transports (not gRPC/XHTTP/H2/QUIC), never over a `mux` block you wrote, with
+  UDP/443 skipped; `emx entry ls` says why it doesn't apply to an entry.
+- **Connection policy**: idle connections live 30 min (`connIdle 1800`, xray's default 300s cut SSH,
+  IMAP IDLE and push sockets), 8s handshake, xray's default half-close timers. Byte accounting is
+  unaffected, and quota cut-offs restart xray, so a revoked user never lingers on an idle socket.
 - **Traffic**: stats are always enabled; counters are sampled every minute (reset-safe) into hourly
   buckets + lifetime totals. The gRPC api binds a loopback port from `11932`, advancing if taken.
 - **Bounded disk**: logs roll at `emx xray logcap` (default 50 MB each, `0` disables); hourly buckets

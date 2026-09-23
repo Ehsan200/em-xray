@@ -482,7 +482,7 @@ func (s *Store) DuplicateEntry(id uint, newName string) (*XrayEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	dup := &XrayEntry{Name: defaultCopyName(newName, src.Name), Outbound: src.Outbound, Enabled: src.Enabled, Dialer: src.Dialer}
+	dup := &XrayEntry{Name: defaultCopyName(newName, src.Name), Outbound: src.Outbound, Enabled: src.Enabled, Dialer: src.Dialer, Mux: src.Mux}
 	if err := s.CreateEntry(dup); err != nil {
 		return nil, err
 	}

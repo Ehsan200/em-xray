@@ -89,11 +89,10 @@ func TestProbeConfigValidatesWithXray(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: parse own share link: %v", tmpl.Name, err)
 		}
-		// Self-signed TLS links carry allowInsecure, which xray >=26 rejects
-		// outright (migrated to pinnedPeerCertSha256) — a pre-existing link/core
-		// mismatch, unrelated to probing.
+		// xray >=26 rejects a config carrying allowInsecure outright; links
+		// pin the certificate instead and the parser must never emit it.
 		if strings.Contains(string(parsed.Outbound), "allowInsecure") {
-			continue
+			t.Fatalf("%s: parsed outbound carries allowInsecure: %s", tmpl.Name, parsed.Outbound)
 		}
 		items = append(items, xray.ProbeItem{Name: tmpl.Name, Outbound: string(parsed.Outbound)})
 		ports = append(ports, port)

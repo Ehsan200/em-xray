@@ -184,11 +184,12 @@ func loglevelCmd() *cobra.Command {
 func probeIntervalCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "probe-interval [seconds]",
-		Short: "show or change how often the observatory probes pool members",
-		Long: "The observatory probes every pool member on this cadence and the leastPing\n" +
-			"balancer picks from the results. It is also how long a master stays blocked\n" +
-			"after an xray restart, before any member has a result. Lower it to shorten\n" +
-			"that window; raise it to cut probe traffic.",
+		Short: "show or change how often the observatory pings pool members",
+		Long: "The burst observatory health-pings every pool member on this cadence\n" +
+			"(default 10s, rolling window of 3, 5s timeout) and each pool's leastLoad\n" +
+			"balancer spreads traffic over the best two. A failing node is dropped on\n" +
+			"its next ping, so a shorter interval reacts faster; a longer one cuts\n" +
+			"probe traffic. Changing it restarts xray.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := &emxv1.ProbeIntervalRequest{}

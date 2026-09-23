@@ -30,6 +30,7 @@ service Daemon {
   rpc EntryDuplicate(DuplicateRequest) returns (EntryReply);
   rpc EntryGetConfig(IdRequest) returns (ConfigReply);     // raw outbound JSON
   rpc EntrySetConfig(SetConfigRequest) returns (EntryReply);
+  rpc EntrySetMux(SetEnabledRequest) returns (EntryReply);  // per-entry mux.cool opt-in
 
   // Inbounds (server listeners routed to a target).
   rpc InboundAdd(InboundAddRequest) returns (InboundReply);
@@ -120,6 +121,8 @@ message WinnerInfo {
   string node = 2;    // winning member name ("" if none selected yet)
   string tag = 3;     // slotN-out-<key>
   int32 members = 4;  // resolved pool size; 0 => nothing to pick, master fails closed
+  repeated string nodes = 5; // every member the leastLoad balancer spreads over, best first
+  int32 alive = 6;           // members whose latest pings succeed; -1 = unknown
 }
 message WinnersReply { repeated WinnerInfo winners = 1; }
 
@@ -197,6 +200,8 @@ message NodeInfo {
   bool active = 3;
   bool disabled = 4;
   int32 latency_ms = 5;
+  int64 parked_until = 6; // unix seconds; non-zero => dead node left out of its pool until then
+  string rejected = 7;    // non-empty => xray refuses this node's config (the reason); left out of its pool
 }
 message SubNodesReply { repeated NodeInfo nodes = 1; }
 
@@ -259,6 +264,11 @@ message XrayState {
   string health_message = 7;
   int32 health_restarts = 8;
   int64 last_health_check = 9;
+  int32 config_restarts = 10; // config changes that needed a restart (each dropped every connection)
+  int32 live_applies = 11;    // config changes applied through the api, no restart
+  int32 parked_nodes = 12;    // dead pool nodes currently left out of their pools
+  string config_error = 13;   // why the last generated config was refused ("" = applied)
+  int32 rejected_nodes = 14;  // pool nodes xray refuses, left out of their pools
 }
 
 message ShutdownRequest {}
@@ -302,6 +312,7 @@ message EntryAddRequest {
   string outbound_json = 3; // raw outbound JSON (alternative to link)
   string dialer = 4;        // non-empty => master
   bool enabled = 5;
+  bool mux = 6;             // opt the outbound into mux.cool (where supported)
 }
 message EntryInfo {
   uint32 id = 1;
@@ -309,6 +320,8 @@ message EntryInfo {
   bool enabled = 3;
   bool is_master = 4;
   string dialer = 5;
+  bool mux = 6;          // stored mux opt-in
+  string mux_note = 7;   // why mux can't apply to this outbound ("" = it can)
 }
 message EntryReply { EntryInfo entry = 1; }
 message EntryListReply { repeated EntryInfo entries = 1; }

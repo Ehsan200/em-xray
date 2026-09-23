@@ -44,7 +44,7 @@ func (s *Server) EntryAdd(ctx context.Context, req *emxv1.EntryAddRequest) (*emx
 	if err := s.validateDialer(req.Dialer, req.Name); err != nil {
 		return nil, err
 	}
-	e := &xray.XrayEntry{Name: req.Name, Outbound: outbound, Enabled: true, Dialer: req.Dialer}
+	e := &xray.XrayEntry{Name: req.Name, Outbound: outbound, Enabled: true, Dialer: req.Dialer, Mux: req.Mux}
 	if err := s.store.CreateEntry(e); err != nil {
 		return nil, err
 	}
@@ -135,6 +135,11 @@ func (s *Server) validateDialer(dialer, selfName string) error {
 			if m := s.store.NamesExist([]string{r.Name}); len(m) > 0 {
 				return fmt.Errorf("dialer references unknown entry %q", r.Name)
 			}
+			if e, err := s.store.GetEntryByName(r.Name); err == nil {
+				if err := xray.CheckMemberOutbound(e.Outbound); err != nil {
+					return fmt.Errorf("dialer member %q: %w", r.Name, err)
+				}
+			}
 		case xray.RefXraySub:
 			if m := s.store.SubNamesExist([]string{r.Name}); len(m) > 0 {
 				return fmt.Errorf("dialer references unknown subscription %q", r.Name)
@@ -153,10 +158,34 @@ func (s *Server) validateDialer(dialer, selfName string) error {
 }
 
 func entryInfo(e xray.XrayEntry) *emxv1.EntryInfo {
+	_, note := xray.MuxSupport(e.Outbound)
 	return &emxv1.EntryInfo{
 		Id: uint32(e.ID), Name: e.Name, Enabled: e.Enabled,
 		IsMaster: e.IsMaster(), Dialer: e.Dialer,
+		Mux: e.Mux, MuxNote: note,
 	}
+}
+
+// EntrySetMux stores the entry's mux opt-in and applies it (live: the entry's
+// outbound is replaced; connections through other entries are untouched).
+func (s *Server) EntrySetMux(ctx context.Context, req *emxv1.SetEnabledRequest) (*emxv1.EntryReply, error) {
+	e, err := s.store.GetEntry(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	if req.Enabled {
+		if ok, why := xray.MuxSupport(e.Outbound); !ok {
+			return nil, fmt.Errorf("mux can't apply to %q: %s", e.Name, why)
+		}
+	}
+	e.Mux = req.Enabled
+	if err := s.store.UpdateEntry(e); err != nil {
+		return nil, err
+	}
+	if err := s.sup.Reconcile(); err != nil {
+		return nil, fmt.Errorf("saved, but reconcile failed: %w", err)
+	}
+	return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
 }
 
 // ---- winners ---------------------------------------------------------------
@@ -168,7 +197,7 @@ func (s *Server) Winners(context.Context, *emxv1.Empty) (*emxv1.WinnersReply, er
 	}
 	out := make([]*emxv1.WinnerInfo, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, &emxv1.WinnerInfo{Master: w.Master, Node: w.Node, Tag: w.Tag, Members: int32(w.Members)})
+		out = append(out, &emxv1.WinnerInfo{Master: w.Master, Node: w.Node, Nodes: w.Nodes, Tag: w.Tag, Members: int32(w.Members), Alive: int32(w.Alive)})
 	}
 	return &emxv1.WinnersReply{Winners: out}, nil
 }

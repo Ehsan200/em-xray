@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
@@ -12,7 +14,7 @@ import (
 func winnerCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "winner",
-		Short:   "show the current fastest node per master",
+		Short:   "show the nodes each master's balancer currently spreads over",
 		Aliases: []string{"winners"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
@@ -25,19 +27,31 @@ func winnerCmd() *cobra.Command {
 					return nil
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "MASTER\tMEMBERS\tFASTEST NODE")
+				fmt.Fprintln(tw, "MASTER\tALIVE\tSELECTED NODES")
 				for _, w := range reply.Winners {
 					node := w.Node
+					if len(w.Nodes) > 0 {
+						node = strings.Join(w.Nodes, ", ")
+					}
 					switch {
 					case w.Members == 0:
 						node = "BLOCKED (pool empty)"
 					case node == "":
 						node = "(selecting…)"
 					}
-					fmt.Fprintf(tw, "%s\t%d\t%s\n", w.Master, w.Members, node)
+					fmt.Fprintf(tw, "%s\t%s\t%s\n", w.Master, aliveLabel(w), node)
 				}
 				return tw.Flush()
 			})
 		},
 	}
+}
+
+// aliveLabel renders "alive/members", or just the pool size before the
+// observatory has reported.
+func aliveLabel(w *emxv1.WinnerInfo) string {
+	if w.Alive < 0 {
+		return strconv.Itoa(int(w.Members))
+	}
+	return fmt.Sprintf("%d/%d", w.Alive, w.Members)
 }

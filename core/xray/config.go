@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -13,7 +14,8 @@ type GenOptions struct {
 	AccessLog     string
 	ErrorLog      string
 	LogLevel      string // default "warning"
-	ProbeInterval string // observatory cadence, e.g. "30s"; default DefaultProbeInterval
+	ProbeInterval string // burst-observatory ping cadence, e.g. "30s"; default DefaultProbeInterval
+	ProbeURL      string // ping destination; default DefaultProbeURL
 }
 
 // Generate builds the full xray config.json from entries (outbounds), inbounds
@@ -22,8 +24,9 @@ type GenOptions struct {
 // encoding/json) so a no-op reconcile is byte-identical and doesn't churn xray.
 //
 // When any slot exists, the master-dialer machinery is emitted: a gRPC api +
-// dokodemo inbound, per-master slot (socks inbound + dialer outbound + member
-// outbounds + leastPing balancer + routing rule), one shared observatory, and
+// dokodemo inbound, per-pool slot (socks inbound + dialer outbound per master +
+// member outbounds + leastLoad balancer + routing rule), one shared burst
+// observatory, and
 // the master's own outbound gets streamSettings.sockopt.dialerProxy so its
 // server connection tunnels through the fastest node.
 func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOptions) ([]byte, error) {
@@ -32,13 +35,10 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	ins := append([]Inbound(nil), inbounds...)
 	sort.Slice(ins, func(i, j int) bool { return ins[i].Name < ins[j].Name })
 	sl := append([]Slot(nil), slots...)
-	sort.Slice(sl, func(i, j int) bool { return sl[i].Master < sl[j].Master })
+	sort.Slice(sl, func(i, j int) bool { return sl[i].Index < sl[j].Index })
 
-	// Master name → slot index (sorted-name order), for dialerProxy wiring.
-	slotIdx := make(map[string]int, len(sl))
-	for i, s := range sl {
-		slotIdx[s.Master] = i
-	}
+	// Master name (owner or alias) → slot index, for dialerProxy wiring.
+	slotIdx := SlotIndexByName(sl)
 
 	loglevel := opts.LogLevel
 	if loglevel == "" {
@@ -68,10 +68,17 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 		if err != nil {
 			return nil, fmt.Errorf("entry %q: %w", e.Name, err)
 		}
-		// A master with a populated slot tunnels its own server connection
-		// through the pool via dialerProxy.
+		if e.Mux {
+			applyMux(ob)
+		}
+		// A master tunnels its own server connection through its pool via
+		// dialerProxy. A master left without a slot (pool limit reached) is
+		// pointed at the blackhole instead: with no dialerProxy it would dial
+		// its server straight off this box.
 		if _, ok := slotIdx[e.Name]; ok {
 			setDialerProxy(ob, DialerTag(e.Name))
+		} else if e.IsMaster() {
+			setDialerProxy(ob, "block")
 		}
 		outbounds = append(outbounds, ob)
 		haveOut[tag] = true
@@ -113,8 +120,9 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 
 	// Always emit the gRPC api inbound + stats + traffic policy so per-inbound
 	// and per-outbound byte counters are collected (the daemon samples them for
-	// the traffic charts). The api routing rule must be FIRST so a user
-	// catch-all can't swallow api traffic.
+	// the traffic charts), and so every config change can be applied live
+	// through the api. The api routing rule must be FIRST so a user catch-all
+	// can't swallow api traffic.
 	inboundsJSON = append(inboundsJSON, map[string]any{
 		"tag": ApiTag, "listen": "127.0.0.1", "port": ApiPort,
 		"protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"},
@@ -122,53 +130,88 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	rules = append([]any{map[string]any{
 		"type": "field", "inboundTag": []any{ApiTag}, "outboundTag": ApiTag,
 	}}, rules...)
-	services := []any{"HandlerService", "RoutingService", "StatsService"}
+	services := []any{"HandlerService", "RoutingService", "StatsService", "ObservatoryService"}
 	cfg["stats"] = map[string]any{}
+	cfg["metrics"] = map[string]any{"tag": MetricsTag, "listen": "127.0.0.1:" + strconv.Itoa(MetricsPort)}
 	cfg["policy"] = map[string]any{
 		"system": map[string]any{
 			"statsInboundUplink": true, "statsInboundDownlink": true,
 			"statsOutboundUplink": true, "statsOutboundDownlink": true,
 		},
-		// Level 0 = per-user (per-client) byte counters, for multi-user inbounds.
+		// Level 0 = every client (all are emitted at level 0): per-user byte
+		// counters for multi-user inbounds, plus an explicit connection
+		// policy. xray's default connIdle (300s) silently cuts long-lived but
+		// quiet streams — SSH sessions, IMAP IDLE (29 min), push and chat
+		// sockets, idle WebSockets — so it is raised past those. Clients that
+		// vanish without a FIN are still reaped by TCP keepalive, and a
+		// revoked client is cut by the restart that revocation forces, so a
+		// long connIdle never lets a disabled or over-quota user linger. The
+		// handshake gets 8s for slow mobile links; the half-close timers keep
+		// xray's defaults so finished transfers are reaped promptly.
 		"levels": map[string]any{
-			"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true},
+			"0": map[string]any{
+				"statsUserUplink": true, "statsUserDownlink": true,
+				"handshake": 8, "connIdle": 1800, "uplinkOnly": 2, "downlinkOnly": 5,
+			},
 		},
 	}
 
 	var balancers []any
-	if len(sl) > 0 {
-		services = append(services, "ObservatoryService")
-		for idx, s := range sl {
+	{
+		for _, s := range sl {
+			idx := s.Index
 			// slot socks inbound
 			inboundsJSON = append(inboundsJSON, map[string]any{
 				"tag": SlotInTag(idx), "listen": "127.0.0.1", "port": SlotPort(idx),
 				"protocol": "socks", "settings": map[string]any{"udp": true, "auth": "noauth"},
 			})
-			// stable dialer outbound → slot inbound
-			outbounds = append(outbounds, map[string]any{
-				"tag": DialerTag(s.Master), "protocol": "socks",
-				"settings": map[string]any{"servers": []any{
-					map[string]any{"address": "127.0.0.1", "port": SlotPort(idx)},
-				}},
-			})
-			// member outbounds (shared slotN-out- prefix → live-adoptable)
+			// one stable dialer outbound per master (owner + aliases), all
+			// into the same slot inbound
+			for _, master := range s.SlotMasters() {
+				outbounds = append(outbounds, map[string]any{
+					"tag": DialerTag(master), "protocol": "socks",
+					"settings": map[string]any{"servers": []any{
+						map[string]any{"address": "127.0.0.1", "port": SlotPort(idx)},
+					}},
+				})
+			}
+			// member outbounds (shared slotN-out- prefix → live-adoptable).
+			// A member that doesn't tunnel is skipped (the resolver already
+			// drops and logs it): it would egress from this box.
+			fallback := "block"
 			for _, m := range s.Members {
+				if CheckMemberOutbound(m.Outbound) != nil {
+					continue
+				}
 				mo, err := MemberOutboundJSON(idx, m)
 				if err != nil {
 					return nil, fmt.Errorf("master %q: %w", s.Master, err)
 				}
+				if fallback == "block" {
+					fallback = SlotMemberTag(idx, m.Key)
+				}
 				outbounds = append(outbounds, mo)
 			}
-			// leastPing balancer over the prefix. fallbackTag pins the
-			// nothing-alive case to `block`: leastPing returns no pick until the
-			// observatory has probed at least one member (a window after every
-			// start, and after a refresh replaces the whole pool), and without an
-			// explicit fallback xray would drop to its default handler. Blocking
-			// there keeps a master's traffic from ever leaving via this box's IP.
+			// leastLoad over the prefix reads the burst observatory's rolling
+			// ping window and spreads connections over the best
+			// SlotBalancerExpected healthy members. No maxRTT cap on purpose:
+			// if every node is slow we still want the least-bad ones.
+			//
+			// fallbackTag covers the moments leastLoad has nothing ranked:
+			// right after xray starts (no ping has completed yet) and when
+			// every member's recent pings failed. It is the pool's FIRST
+			// member: with `block` there, every master connection failed
+			// until the first ping landed after each start. A member still
+			// egresses through a node, never this box — CheckMemberOutbound
+			// guarantees it tunnels — so this is not a leak. Only an empty
+			// pool falls back to `block`, keeping the master fail-closed.
 			balancers = append(balancers, map[string]any{
 				"tag": SlotBalTag(idx), "selector": []any{SlotOutPrefix(idx)},
-				"strategy":    map[string]any{"type": "leastPing"},
-				"fallbackTag": "block",
+				"strategy": map[string]any{
+					"type":     "leastLoad",
+					"settings": map[string]any{"expected": SlotBalancerExpected},
+				},
+				"fallbackTag": fallback,
 			})
 			// route slot inbound → balancer
 			rules = append(rules, map[string]any{
@@ -177,11 +220,19 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			})
 		}
 
-		cfg["observatory"] = map[string]any{
-			"subjectSelector":   []any{ObservatorySelectorPrefix},
-			"probeURL":          DefaultProbeURL,
-			"probeInterval":     orDefault(opts.ProbeInterval, DefaultProbeInterval),
-			"enableConcurrency": true,
+		// One shared burst observatory feeds every slot's leastLoad; its
+		// prefix selector matches every slot member outbound. Emitted even
+		// with no slots: it idles with nothing to match, and having it from
+		// the start means the first master a user adds applies live instead
+		// of restarting xray (the api can't add an observatory).
+		cfg["burstObservatory"] = map[string]any{
+			"subjectSelector": []any{ObservatorySelectorPrefix},
+			"pingConfig": map[string]any{
+				"destination": orDefault(opts.ProbeURL, DefaultProbeURL),
+				"interval":    orDefault(opts.ProbeInterval, DefaultProbeInterval),
+				"sampling":    DefaultProbeSampling,
+				"timeout":     DefaultPingTimeout,
+			},
 		}
 	}
 	cfg["api"] = map[string]any{"tag": ApiTag, "services": services}
@@ -263,9 +314,10 @@ func buildInbound(in Inbound) (map[string]any, error) {
 		ib["settings"] = map[string]any{"clients": inboundClients(in)}
 	case "hysteria":
 		// hysteria is a QUIC transport carrying its own protocol: auth-based
-		// users live in settings.users; the transport params (version, primary
+		// users live in settings.clients (xray v26 ignores a "users" key, so no one
+		// could authenticate); the transport params (version, primary
 		// auth, masquerade) live in streamSettings.hysteriaSettings below.
-		ib["settings"] = map[string]any{"version": 2, "users": hysteriaUsers(in)}
+		ib["settings"] = map[string]any{"version": 2, "clients": hysteriaUsers(in)}
 	default:
 		return nil, fmt.Errorf("unsupported inbound protocol %q", in.Protocol)
 	}
@@ -297,7 +349,7 @@ func inboundClients(in Inbound) []any {
 	return clients
 }
 
-// hysteriaUsers builds the settings.users array for a hysteria inbound: the
+// hysteriaUsers builds the settings.clients array for a hysteria inbound: the
 // primary credential plus every extra user, each an auth string with a level-0
 // stats email so xray reports per-user byte counters. The daemon has already
 // dropped over-quota users.
@@ -366,6 +418,12 @@ func buildInboundStream(in Inbound) (map[string]any, error) {
 		if in.TLSSNI != "" {
 			tls["serverName"] = in.TLSSNI
 		}
+		// Hysteria2 is HTTP/3: its clients offer only "h3", and xray's TLS
+		// server doesn't add it on its own — without it every hysteria2
+		// handshake ends in "tls: no application protocol".
+		if network == "hysteria" {
+			tls["alpn"] = []any{"h3"}
+		}
 		ss["tlsSettings"] = tls
 	case "", "none":
 		// plain
@@ -394,7 +452,7 @@ func buildInboundStream(in Inbound) (map[string]any, error) {
 		ss["grpcSettings"] = map[string]any{"serviceName": in.Path}
 	case "hysteria":
 		// version+auth are the transport-level params; auth is the primary
-		// credential (overridden per-client by settings.users). masquerade is
+		// credential (overridden per-client by settings.clients). masquerade is
 		// omitted → xray serves its default 404 page. udpIdleTimeout left at the
 		// xray default (60s).
 		hy := map[string]any{"version": 2}
@@ -425,7 +483,23 @@ func entryOutbound(raw, tag string) (map[string]any, error) {
 	}
 	m["tag"] = tag
 	healXHTTPExtra(m)
+	healAllowInsecure(m)
 	return m, nil
+}
+
+// healAllowInsecure drops tlsSettings.allowInsecure, which xray v26 removed: a
+// config carrying it anywhere is rejected whole, so one entry or pool node
+// stored by an older build (whose link parser kept it) would take every
+// inbound down. Without it the outbound verifies its certificate normally, or
+// by pinnedPeerCertSha256 when the link carried one.
+func healAllowInsecure(outbound map[string]any) {
+	ss, ok := outbound["streamSettings"].(map[string]any)
+	if !ok {
+		return
+	}
+	if tls, ok := ss["tlsSettings"].(map[string]any); ok {
+		delete(tls, "allowInsecure")
+	}
 }
 
 // healXHTTPExtra fixes a legacy import quirk: xhttp

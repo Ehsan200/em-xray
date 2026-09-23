@@ -7,8 +7,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ehsan200/em-xray/core/xray"
@@ -33,10 +35,31 @@ type Supervisor struct {
 	healthRestarts  int32
 	healthMessage   string
 	healthCheckedAt time.Time
-	// loadedSlots is what xray currently has live per master: slot index + the
-	// set of member keys. Set to the baked slots on Reconcile; advanced
-	// incrementally by SyncDialerMembers as it applies deltas.
-	loadedSlots map[string]loadedSlot
+	// running is the config the live process reflects — what it was started
+	// with, advanced by every successful live apply. Reconcile diffs against it
+	// to change the process without restarting it.
+	running []byte
+	// loadedSlots are the dialer slots in running (winner/balancer queries).
+	loadedSlots []xray.Slot
+	// slotIdx pins each pool (dialer group key) to its slot index across
+	// reconciles, so adding a master that sorts first never renumbers — and
+	// thereby replaces — every other pool's slot.
+	slotIdx map[string]int
+	// Config restarts of a running process vs. changes applied live. Atomic
+	// so Status never waits on a reconcile holding mu.
+	restarts    atomic.Int32
+	liveApplies atomic.Int32
+	// parker leaves dead pool nodes out of their slot (see nodepark.go).
+	parker *nodeParker
+	// rejected are pool members xray refused (see validate.go).
+	rejectedMu sync.Mutex
+	rejected   map[string]rejection
+	// cfgErr is the last reason a generated config was refused.
+	cfgErrMu sync.Mutex
+	cfgErr   string
+	// probeURL overrides the observatory ping destination (tests point it at
+	// a local 204 server); "" = xray.DefaultProbeURL.
+	probeURL string
 }
 
 const (
@@ -44,22 +67,16 @@ const (
 	xrayHealthFailureLimit = 3
 )
 
-// loadedSlot tracks a master's live slot: its index and current member keys.
-type loadedSlot struct {
-	idx  int
-	keys map[string]bool
-}
-
 func NewSupervisor(store *xray.Store, p paths.Paths, logger *log.Logger) *Supervisor {
-	s := &Supervisor{store: store, paths: p, log: logger, loadedSlots: map[string]loadedSlot{}}
+	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), rejected: map[string]rejection{}}
 	s.wd = NewWatchdog(xrayCmdFactory(p, logger), logger)
 	return s
 }
 
-// Reconcile is the full path: assign ports, regenerate config.json, and start or
-// restart xray. Restart-on-config-change is acceptable here — the zero-restart
-// requirement applies to routine node churn (SyncDialerMembers), not structural
-// changes. Safe to call from multiple goroutines (serialized by mu).
+// Reconcile is the one path from stored state to the running xray: assign
+// ports, regenerate config.json, and start xray or bring it to the new config
+// — live through the api whenever possible (see xray_live.go), restarting only
+// when unavoidable. Safe to call from multiple goroutines (serialized by mu).
 func (s *Supervisor) Reconcile() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,88 +127,161 @@ func (s *Supervisor) reconcileLocked() error {
 	for i := range inbounds {
 		inbounds[i].Users = s.activeUsers(inbounds[i].ID)
 	}
-	slots, err := s.resolveDialerSlots(entries)
-	if err != nil {
-		return err
-	}
-
-	cfg, err := xray.Generate(entries, inbounds, slots, xray.GenOptions{
-		AccessLog: s.paths.AccessLog(),
-		ErrorLog:  s.paths.ErrorLog(),
-		LogLevel:  s.store.LogLevel(),
-		// A restart clears every observation, so the probe cadence is also how
-		// long masters stay fail-closed afterwards.
-		ProbeInterval: strconv.Itoa(s.store.ProbeIntervalSec()) + "s",
-	})
-	if err != nil {
-		return err
-	}
-	// Generate is deterministic precisely so this comparison is possible: an
-	// RPC that reconciles without actually changing anything must not cycle
-	// xray. A restart is never free — it drops every client connection, and it
-	// resets the observatory, leaving masters fail-closed until the first probe
-	// lands.
-	unchanged := false
-	if old, err := os.ReadFile(s.paths.XrayConfig()); err == nil && bytes.Equal(old, cfg) {
-		unchanged = true
-	}
-	if !unchanged {
-		if err := writeFileAtomic(s.paths.XrayConfig(), cfg); err != nil {
+	// Generate, then have xray itself check the config before anything is
+	// applied (see validate.go). A refused pool member is left out and the
+	// config regenerated; anything else keeps the running config.
+	for attempt := 0; ; attempt++ {
+		slots, err := s.resolveDialerSlots(entries)
+		if err != nil {
 			return err
 		}
-		// A direct inbound egresses from this box's own IP. Legitimate, but
-		// never something to discover by accident — name them whenever the
-		// routing actually changes (not on every no-op reconcile).
-		for _, in := range inbounds {
-			if !in.Enabled {
-				continue
+		cfg, err := xray.Generate(entries, inbounds, slots, xray.GenOptions{
+			AccessLog:     s.paths.AccessLog(),
+			ErrorLog:      s.paths.ErrorLog(),
+			LogLevel:      s.store.LogLevel(),
+			ProbeInterval: strconv.Itoa(s.store.ProbeIntervalSec()) + "s",
+			ProbeURL:      s.probeURL,
+		})
+		if err != nil {
+			s.setConfigError(err.Error())
+			return err
+		}
+		if s.running != nil && bytes.Equal(s.running, cfg) {
+			// Already validated when it was applied.
+			return s.applyLocked(inbounds, slots, cfg)
+		}
+		verr := s.testConfig(cfg)
+		if verr == nil {
+			s.setConfigError("")
+			return s.applyLocked(inbounds, slots, cfg)
+		}
+		if m, ok := memberForTag(slots, rejectedTag(verr)); ok && attempt < 16 {
+			s.log.Printf("xray rejects pool node %s — left out of its pool: %v", s.memberName(m.Key), verr)
+			s.reject(m.Key, rejection{outbound: m.Outbound, reason: verr.Error()})
+			continue
+		}
+		msg := fmt.Sprintf("xray rejects the new config, keeping the running one: %v", verr)
+		s.log.Print(msg)
+		s.setConfigError(msg)
+		return fmt.Errorf("%s", msg)
+	}
+}
+
+// memberForTag finds the pool member a slot member tag belongs to.
+func memberForTag(slots []xray.Slot, tag string) (xray.SlotMember, bool) {
+	for _, sl := range slots {
+		for _, m := range sl.Members {
+			if xray.SlotMemberTag(sl.Index, m.Key) == tag {
+				return m, true
 			}
-			if kind, _, err := xray.ParseTarget(in.Target); err == nil && kind == xray.TargetDirect {
-				s.log.Printf("inbound %q targets direct — its traffic egresses from this server's own IP", in.Name)
-			}
+		}
+	}
+	return xray.SlotMember{}, false
+}
+
+// applyLocked brings xray to cfg: start it, leave it alone (identical),
+// apply the difference live through the api, or — only when the api can't
+// express the change or a call fails — restart it. Callers hold s.mu.
+func (s *Supervisor) applyLocked(inbounds []xray.Inbound, slots []xray.Slot, cfg []byte) error {
+	if !routable(inbounds) {
+		if s.wd.IsStarted() {
+			s.log.Print("reconcile: no routable entries — stopping xray")
+			s.wd.Stop(5 * time.Second)
+		}
+		s.running, s.loadedSlots = nil, nil
+		return nil
+	}
+	// Generate is deterministic precisely so this comparison is possible: an
+	// RPC that reconciles without changing anything must not touch xray.
+	if s.wd.IsStarted() && s.running != nil && bytes.Equal(s.running, cfg) {
+		s.loadedSlots = slots
+		return nil
+	}
+	// The file is what the watchdog (re)starts xray from, so it is written
+	// first: a crash, or a restart after a failed live apply, converges on it.
+	if err := writeFileAtomic(s.paths.XrayConfig(), cfg); err != nil {
+		return err
+	}
+	// A direct inbound egresses from this box's own IP. Legitimate, but never
+	// something to discover by accident — name them whenever the config
+	// actually changes (not on every no-op reconcile).
+	for _, in := range inbounds {
+		if !in.Enabled {
+			continue
+		}
+		if kind, _, err := xray.ParseTarget(in.Target); err == nil && kind == xray.TargetDirect {
+			s.log.Printf("inbound %q targets direct — its traffic egresses from this server's own IP", in.Name)
 		}
 	}
 
-	if routable(inbounds) {
-		switch {
-		case !s.wd.IsStarted():
-			s.log.Print("reconcile: starting xray")
-			s.wd.Start()
-		case unchanged:
-			// xray keeps running, so it also keeps whatever the live-sync path
-			// (ado/rmo) put in its slots. loadedSlots must NOT be reset here —
-			// it still describes what is actually loaded.
-			s.log.Print("reconcile: config unchanged — leaving xray alone")
-			return nil
-		default:
-			s.log.Print("reconcile: restarting xray with new config")
-			s.wd.Restart()
-		}
-		// The freshly-written config bakes exactly these members, so they are
-		// now what xray has live. Live sync diffs against this baseline.
-		s.loadedSlots = toLoaded(slots)
-	} else if s.wd.IsStarted() {
-		s.log.Print("reconcile: no routable entries — stopping xray")
-		s.wd.Stop(5 * time.Second)
-		s.loadedSlots = map[string]loadedSlot{}
-	} else {
-		s.loadedSlots = map[string]loadedSlot{}
+	switch {
+	case !s.wd.IsStarted():
+		s.log.Print("reconcile: starting xray")
+		s.wd.Start()
+	case s.running != nil && s.applyLive(cfg):
+		// applied without a restart
+	default:
+		s.log.Print("reconcile: restarting xray with new config")
+		s.restarts.Add(1)
+		s.wd.Restart()
 	}
+	s.running = cfg
+	s.loadedSlots = slots
 	return nil
 }
 
-// toLoaded snapshots resolved slots into the live-tracking form.
-func toLoaded(slots []xray.Slot) map[string]loadedSlot {
-	idx := xray.SlotIndexByName(slots)
-	m := make(map[string]loadedSlot, len(slots))
-	for _, sl := range slots {
-		keys := make(map[string]bool, len(sl.Members))
-		for _, mem := range sl.Members {
-			keys[mem.Key] = true
-		}
-		m[sl.Master] = loadedSlot{idx: idx[sl.Master], keys: keys}
+// applyLive tries to bring the running process from s.running to cfg without
+// a restart, and reports whether it did. On false the caller restarts, which
+// converges from whatever state a partial apply left behind.
+func (s *Supervisor) applyLive(cfg []byte) bool {
+	oldLC, err := parseLiveConfig(s.running)
+	if err != nil {
+		s.log.Printf("live apply: parse running config: %v — restarting", err)
+		return false
 	}
-	return m
+	newLC, err := parseLiveConfig(cfg)
+	if err != nil {
+		s.log.Printf("live apply: parse new config: %v — restarting", err)
+		return false
+	}
+	plan := planLive(oldLC, newLC)
+	if plan.restart {
+		s.log.Printf("live apply: %s — restarting", plan.why)
+		return false
+	}
+	if plan.empty() {
+		return true
+	}
+	// A child started moments ago may not have bound its api yet.
+	if err := s.waitAPIReady(5 * time.Second); err != nil {
+		s.log.Printf("live apply: api not answering (%v) — restarting", err)
+		return false
+	}
+	if err := s.applyLiveLocked(plan, cfg); err != nil {
+		s.log.Printf("live apply failed: %v — restarting", err)
+		return false
+	}
+	s.liveApplies.Add(1)
+	s.log.Printf("applied live, no restart (outbounds -%d +%d, inbounds -%d +%d, routing %v)",
+		len(plan.rmOut), len(plan.addOut), len(plan.rmIn), len(plan.addIn), plan.routing)
+	return true
+}
+
+// SyncDialerMembers is Reconcile for callbacks with no error to return (a
+// subscription refresh, a node or subscription toggle). Pool churn used to
+// have its own ado/rmo delta path; the live apply now covers it — a member
+// change is just outbounds added/removed plus a routing swap — so there is one
+// path and one notion of what xray is running.
+func (s *Supervisor) SyncDialerMembers() {
+	if err := s.Reconcile(); err != nil {
+		s.log.Printf("sync: %v", err)
+	}
+}
+
+// Counters reports config restarts of a running xray (each dropped every
+// connection) and changes applied live, since the daemon started.
+func (s *Supervisor) Counters() (restarts, liveApplies int) {
+	return int(s.restarts.Load()), int(s.liveApplies.Load())
 }
 
 // Stop terminates the xray child and its supervisor loop.
@@ -214,7 +304,7 @@ func (s *Supervisor) RestartXray() (bool, int, error) {
 	// Full stop first so a hung child is signalled (and killed after the grace
 	// period) rather than merely asked to reload.
 	s.wd.Stop(5 * time.Second)
-	s.loadedSlots = map[string]loadedSlot{}
+	s.running, s.loadedSlots = nil, nil
 	if err := s.reconcileLocked(); err != nil {
 		return false, 0, err
 	}
@@ -317,69 +407,146 @@ func (s *Supervisor) XrayHealth() (checked, responsive bool, message string, res
 // refs → the subscription's ACTIVE nodes. Members dedupe by content Key.
 // proxy: refs are not yet supported.
 //
+// Masters whose Dialer names the same refs (order-insensitive) share ONE slot
+// (see xray.Slot): probe cost scales with unique pools, not with masters.
+//
 // Every enabled master gets a slot, INCLUDING one that resolves to zero members
 // (sub not fetched yet, all nodes inactive, a bad ref). Dropping the slot would
 // strip the master's dialerProxy and make it dial straight off this box —
 // leaking the server's IP exactly when the pool is unavailable. An empty slot
 // keeps the dialerProxy wired to a balancer that has nothing to pick, which
-// falls back to `block`: the master fails closed until the pool fills.
+// falls back to `block`: the master fails closed until the pool fills. Past
+// xray.SlotCount unique pools a master gets no slot, and Generate points its
+// dialerProxy at the blackhole for the same reason.
 func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, error) {
 	byName := make(map[string]xray.XrayEntry, len(entries))
+	var masters []xray.XrayEntry
 	for _, e := range entries {
 		byName[e.Name] = e
+		if e.Enabled && e.IsMaster() {
+			masters = append(masters, e)
+		}
 	}
+	sort.Slice(masters, func(i, j int) bool { return masters[i].Name < masters[j].Name })
 
 	var slots []xray.Slot
-	for _, e := range entries {
-		if !e.Enabled || !e.IsMaster() {
-			continue
-		}
+	slotByKey := map[string]int{} // dialer group key → index into slots
+	parked := s.parker.parked()
+	present := map[string]bool{} // every member key any pool resolves to
+	defer func() { s.forgetRejectedExcept(present) }()
+	for _, e := range masters {
 		refs, err := xray.ParseDialer(e.Dialer)
+		key := ""
 		if err != nil {
 			// Unparseable dialer still yields an empty slot, not no slot: the
 			// master must stay behind the (empty → blocking) balancer rather
-			// than fall back to dialing off this box.
+			// than fall back to dialing off this box. Its own key keeps it
+			// from sharing a slot with anything.
 			s.log.Printf("master %q: bad dialer: %v — pool empty, master blocked", e.Name, err)
-			slots = append(slots, xray.Slot{Master: e.Name})
+			refs, key = nil, "invalid:"+e.Name
+		} else {
+			key = xray.DialerGroupKey(refs)
+		}
+		if i, ok := slotByKey[key]; ok {
+			slots[i].Aliases = append(slots[i].Aliases, e.Name)
 			continue
 		}
-		var members []xray.SlotMember
-		seen := map[string]bool{}
-		add := func(key, outbound string) {
-			if key == "" || outbound == "" || seen[key] {
-				return
-			}
-			seen[key] = true
-			members = append(members, xray.SlotMember{Key: key, Outbound: outbound})
+		resolved := s.resolveDialerMembers(refs, byName)
+		for _, m := range resolved {
+			present[m.Key] = true
 		}
-		for _, r := range refs {
-			switch r.Kind {
-			case xray.RefXray:
-				if m, ok := byName[r.Name]; ok && m.Enabled {
-					add("xray-"+r.Name, m.Outbound)
-				}
-			case xray.RefXraySub:
-				sub, err := s.store.GetSubscriptionByName(r.Name)
-				if err != nil {
-					continue
-				}
-				nodes, err := s.store.ActiveNodes(sub.ID)
-				if err != nil {
-					continue
-				}
-				for _, n := range nodes {
-					add(n.Fingerprint, n.Outbound)
-				}
-			case xray.RefProxy:
-				// proxy upstreams not yet modelled — skipped.
-			}
-		}
+		members := withoutParked(s.withoutRejected(resolved), parked)
 		if len(members) == 0 {
 			s.log.Printf("master %q: dialer resolved to 0 members — master blocked until pool fills", e.Name)
 		}
-		slots = append(slots, xray.Slot{Master: e.Name, Members: members})
+		slotByKey[key] = len(slots)
+		slots = append(slots, xray.Slot{Master: e.Name, Key: key, Index: -1, Members: members})
 	}
-	return slots, nil
+	return s.assignSlotIndices(slots), nil
+}
+
+// assignSlotIndices gives every pool a slot index, keeping the one it had on
+// the previous reconcile when possible (a changed index renames every tag and
+// port of the slot, which the live apply would have to replace), and the
+// lowest free index otherwise. Pools past SlotCount get none and are dropped;
+// Generate then blocks their masters. Returned sorted by index.
+func (s *Supervisor) assignSlotIndices(slots []xray.Slot) []xray.Slot {
+	if s.slotIdx == nil {
+		s.slotIdx = map[string]int{}
+	}
+	used := map[int]bool{}
+	for i := range slots {
+		if idx, ok := s.slotIdx[slots[i].Key]; ok && idx < xray.SlotCount && !used[idx] {
+			slots[i].Index = idx
+			used[idx] = true
+		}
+	}
+	next := 0
+	var out []xray.Slot
+	for _, sl := range slots {
+		if sl.Index < 0 {
+			for next < xray.SlotCount && used[next] {
+				next++
+			}
+			if next >= xray.SlotCount {
+				s.log.Printf("master %q: all %d dialer slots in use — master blocked", sl.Master, xray.SlotCount)
+				continue
+			}
+			sl.Index = next
+			used[next] = true
+		}
+		out = append(out, sl)
+	}
+	s.slotIdx = map[string]int{}
+	for _, sl := range out {
+		s.slotIdx[sl.Key] = sl.Index
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Index < out[j].Index })
+	return out
+}
+
+// resolveDialerMembers expands dialer refs into member outbounds, deduped by
+// stable key.
+func (s *Supervisor) resolveDialerMembers(refs []xray.DialerRef, byName map[string]xray.XrayEntry) []xray.SlotMember {
+	var members []xray.SlotMember
+	seen := map[string]bool{}
+	add := func(key, outbound string) {
+		if key == "" || outbound == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		members = append(members, xray.SlotMember{Key: key, Outbound: outbound})
+	}
+	for _, r := range refs {
+		switch r.Kind {
+		case xray.RefXray:
+			if m, ok := byName[r.Name]; ok && m.Enabled {
+				if err := xray.CheckMemberOutbound(m.Outbound); err != nil {
+					s.log.Printf("dialer member %q skipped: %v", r.Name, err)
+					continue
+				}
+				add("xray-"+r.Name, m.Outbound)
+			}
+		case xray.RefXraySub:
+			sub, err := s.store.GetSubscriptionByName(r.Name)
+			if err != nil {
+				continue
+			}
+			nodes, err := s.store.ActiveNodes(sub.ID)
+			if err != nil {
+				continue
+			}
+			for _, n := range nodes {
+				if xray.CheckMemberOutbound(n.Outbound) != nil {
+					continue // the link parser only yields proxies; defensive
+				}
+				add(n.Fingerprint, n.Outbound)
+			}
+		case xray.RefProxy:
+			// proxy upstreams not yet modelled — skipped.
+		}
+	}
+	return members
 }
 
 // routable reports whether xray has anything to serve: any enabled inbound with

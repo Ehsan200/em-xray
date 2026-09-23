@@ -2,6 +2,18 @@ package xray
 
 import "testing"
 
+// Real `xray api bi` output for a leastLoad balancer with expected=2.
+func TestParseBalancerSelects(t *testing.T) {
+	text := "  - Selecting Override:\n    1                 \n  - Selects:\n    1   slot0-out-xray-good2\n    2   slot0-out-xray-good1\n"
+	got := ParseBalancerSelects(text)["slot0-bal"]
+	if len(got) != 2 || got[0] != "slot0-out-xray-good2" || got[1] != "slot0-out-xray-good1" {
+		t.Fatalf("selects = %v", got)
+	}
+	if w := ParseBalancerWinners(text)["slot0-bal"]; w != "slot0-out-xray-good2" {
+		t.Fatalf("winner = %q", w)
+	}
+}
+
 func TestParseBalancerWinners(t *testing.T) {
 	// Tolerant of exact bi text format — keys off the slotN-out- token.
 	text := `Balancer: slot0-bal

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -19,23 +20,26 @@ import (
 // sigTerm is the signal used to ask a child (and the daemon) to stop gracefully.
 var sigTerm = syscall.SIGTERM
 
-// pickAPIPort returns a free loopback port for xray's gRPC api, starting at the
-// default and scanning upward. This avoids a clash with another xray (e.g. the
-// user's em-wall) already holding the default. Falls back to the default if the
-// scan finds nothing free.
-func pickAPIPort(logger *log.Logger) int {
-	for port := xray.DefaultApiPort; port < xray.DefaultApiPort+64; port++ {
+// pickLoopbackPort returns a free loopback port starting at def and scanning
+// upward, skipping any in avoid. This avoids a clash with another xray (e.g.
+// the user's em-wall) already holding the default. Falls back to the default
+// if the scan finds nothing free.
+func pickLoopbackPort(logger *log.Logger, what string, def int, avoid ...int) int {
+	for port := def; port < def+64; port++ {
+		if slices.Contains(avoid, port) {
+			continue
+		}
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
 			continue
 		}
 		ln.Close()
-		if port != xray.DefaultApiPort {
-			logger.Printf("api port %d busy; using %d", xray.DefaultApiPort, port)
+		if port != def {
+			logger.Printf("%s port %d busy; using %d", what, def, port)
 		}
 		return port
 	}
-	return xray.DefaultApiPort
+	return def
 }
 
 // Run is the daemon entrypoint (invoked by the detached `emx daemon run`). It
@@ -72,7 +76,8 @@ func Run(ctx context.Context) error {
 
 	// Move xray's gRPC api port off a busy default (e.g. another xray already on
 	// 11932) so config generation + every `xray api` call agree on a free port.
-	xray.ApiPort = pickAPIPort(logger)
+	xray.ApiPort = pickLoopbackPort(logger, "api", xray.DefaultApiPort)
+	xray.MetricsPort = pickLoopbackPort(logger, "metrics", xray.DefaultMetricsPort, xray.ApiPort)
 
 	// Fresh socket: a stale file from a crash would make Listen fail.
 	_ = os.Remove(p.Socket())
@@ -117,6 +122,8 @@ func Run(ctx context.Context) error {
 	// A process can remain alive while its API/event loop is wedged. Probe it
 	// independently of the crash watchdog and restart after repeated failures.
 	sup.StartHealthMonitor(ctx)
+	// Leave pool nodes that stay dead out of their pools (applied live).
+	sup.StartNodeHealth(ctx)
 	// Keep xray's logs from filling the disk (rolls past the configured cap).
 	NewLogRotator(store, p, logger).Start(ctx)
 

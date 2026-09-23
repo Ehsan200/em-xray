@@ -1,8 +1,11 @@
 package xray
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -56,7 +59,7 @@ func ShareLink(in Inbound, host string) string {
 			if in.TLSSNI != "" {
 				q.Set("sni", in.TLSSNI)
 			}
-			q.Set("allowInsecure", "1") // self-signed cert
+			setSelfSignedPin(q, in)
 		}
 		if caddy {
 			q.Set("security", "tls")
@@ -77,6 +80,17 @@ func ShareLink(in Inbound, host string) string {
 			"aid": "0", "scy": "auto", "net": orDefault(in.Network, "tcp"),
 			"type": "none", "host": in.Host, "path": orDefault(in.Path, ""), "tls": tls,
 		}
+		if in.Security == "tls" {
+			if in.TLSSNI != "" {
+				vm["sni"] = in.TLSSNI
+			}
+			// Self-signed: pin the certificate (xray v26+ clients; older
+			// v2rayN-style clients read "allowInsecure").
+			if pin := CertSHA256(in.TLSCert); pin != "" {
+				vm["pcs"] = pin
+			}
+			vm["allowInsecure"] = true
+		}
 		raw, _ := json.Marshal(vm)
 		return "vmess://" + base64.StdEncoding.EncodeToString(raw)
 
@@ -88,7 +102,7 @@ func ShareLink(in Inbound, host string) string {
 			if in.TLSSNI != "" {
 				q.Set("sni", in.TLSSNI)
 			}
-			q.Set("allowInsecure", "1") // self-signed cert
+			setSelfSignedPin(q, in)
 		}
 		q.Set("type", orDefault(in.Network, "tcp"))
 		setTransportQuery(q, in)
@@ -98,7 +112,10 @@ func ShareLink(in Inbound, host string) string {
 		// hysteria2:// URI (sing-box / v2rayN / official client). Auth is the
 		// userinfo; insecure=1 because the server cert is self-signed.
 		q := url.Values{}
-		q.Set("insecure", "1")
+		q.Set("insecure", "1") // clients whose core predates pinning
+		if pin := CertSHA256(in.TLSCert); pin != "" {
+			q.Set("pinSHA256", pin)
+		}
 		if in.TLSSNI != "" {
 			q.Set("sni", in.TLSSNI)
 		}
@@ -157,4 +174,27 @@ func setTransportQuery(q url.Values, in Inbound) {
 	case "grpc":
 		q.Set("serviceName", in.Path)
 	}
+}
+
+// setSelfSignedPin makes a self-signed TLS link verifiable. xray v26+ clients
+// pin the certificate (`pcs` = pinnedPeerCertSha256, the leaf's SHA-256);
+// clients on an older core don't know pinning and need allowInsecure, which
+// v26 rejects in a config but which v26-era apps drop when a pin is present.
+func setSelfSignedPin(q url.Values, in Inbound) {
+	if pin := CertSHA256(in.TLSCert); pin != "" {
+		q.Set("pcs", pin)
+	}
+	q.Set("allowInsecure", "1")
+}
+
+// CertSHA256 returns the lowercase hex SHA-256 of the first certificate in a
+// PEM blob — what xray's pinnedPeerCertSha256 and `xray tls hash` use. "" when
+// the PEM holds no certificate.
+func CertSHA256(certPEM string) string {
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return ""
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:])
 }

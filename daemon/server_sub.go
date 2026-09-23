@@ -15,7 +15,7 @@ func (s *Server) SubAdd(ctx context.Context, req *emxv1.SubAddRequest) (*emxv1.S
 	if err := s.store.CreateSubscription(sub); err != nil {
 		return nil, err
 	}
-	// Populate immediately so the pool is usable at once (fires SyncDialerMembers).
+	// Populate immediately so the pool is usable at once (fires SyncDialerMembers → Reconcile).
 	_, _ = s.fetcher.RefreshOne(ctx, sub.ID)
 	fresh, err := s.store.GetSubscription(sub.ID)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Server) SubRemove(ctx context.Context, req *emxv1.IdRequest) (*emxv1.Em
 	if err := s.store.DeleteSubscription(uint(req.Id)); err != nil {
 		return nil, err
 	}
-	s.sup.SyncDialerMembers() // pool shrinks live (or reconciles if a slot vanished)
+	s.sup.SyncDialerMembers() // pool shrinks live
 	return &emxv1.Empty{}, nil
 }
 
@@ -90,12 +90,19 @@ func (s *Server) SubNodes(ctx context.Context, req *emxv1.IdRequest) (*emxv1.Sub
 	if err != nil {
 		return nil, err
 	}
+	parked := s.sup.ParkedNodes()
+	rejected := s.sup.RejectedMembers()
 	var out []*emxv1.NodeInfo
 	for _, n := range nodes {
-		out = append(out, &emxv1.NodeInfo{
+		info := &emxv1.NodeInfo{
 			Fingerprint: n.Fingerprint, Name: n.Name, Active: n.Active,
 			Disabled: disabled[n.Fingerprint], LatencyMs: int32(n.LastLatencyMs),
-		})
+		}
+		if until, ok := parked[n.Fingerprint]; ok {
+			info.ParkedUntil = until.Unix()
+		}
+		info.Rejected = rejected[n.Fingerprint]
+		out = append(out, info)
 	}
 	return &emxv1.SubNodesReply{Nodes: out}, nil
 }
@@ -112,7 +119,7 @@ func (s *Server) SubRename(ctx context.Context, req *emxv1.RenameRequest) (*emxv
 	if err := s.store.RenameSubscription(uint(req.Id), req.NewName); err != nil {
 		return nil, err
 	}
-	s.sup.SyncDialerMembers() // dialer refs rewritten → pool unchanged, but reconcile if needed
+	s.sup.SyncDialerMembers() // dialer refs rewritten; applied live
 	return &emxv1.Empty{}, nil
 }
 

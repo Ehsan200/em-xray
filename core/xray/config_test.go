@@ -73,6 +73,15 @@ func TestGenerateEntriesAndInbounds(t *testing.T) {
 	if dig(t, m, "policy", "system", "statsInboundUplink") != true {
 		t.Error("inbound traffic stats policy must be on")
 	}
+	// Explicit connection policy next to the per-user counters.
+	for k, want := range map[string]float64{"handshake": 8, "connIdle": 1800, "uplinkOnly": 2, "downlinkOnly": 5} {
+		if got := dig(t, m, "policy", "levels", "0", k); got != want {
+			t.Errorf("policy.levels.0.%s = %v, want %v", k, got, want)
+		}
+	}
+	if dig(t, m, "policy", "levels", "0", "statsUserUplink") != true {
+		t.Error("per-user counters must stay on")
+	}
 }
 
 func TestBuildInboundSocksAuth(t *testing.T) {
@@ -210,11 +219,15 @@ func TestGenerateProbeInterval(t *testing.T) {
 		if err := json.Unmarshal(b, &m); err != nil {
 			t.Fatal(err)
 		}
-		obs, ok := m["observatory"].(map[string]any)
+		obs, ok := m["burstObservatory"].(map[string]any)
 		if !ok {
-			t.Fatal("no observatory in config")
+			t.Fatal("no burstObservatory in config")
 		}
-		return obs["probeInterval"].(string)
+		ping := obs["pingConfig"].(map[string]any)
+		if ping["sampling"] != float64(DefaultProbeSampling) || ping["timeout"] != DefaultPingTimeout {
+			t.Errorf("pingConfig = %v, want sampling %d timeout %s", ping, DefaultProbeSampling, DefaultPingTimeout)
+		}
+		return ping["interval"].(string)
 	}
 
 	if got := read(t, GenOptions{}); got != DefaultProbeInterval {

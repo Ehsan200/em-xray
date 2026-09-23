@@ -10,9 +10,8 @@ const (
 	PortStart = 11800 // per-entry SOCKS inbounds
 	PortEnd   = 11899
 
-	SlotPortStart = 11900 // slot inbounds; SlotCount masters max
-	SlotCount     = 32
-	SlotPortEnd   = SlotPortStart + SlotCount - 1 // 11931
+	DefaultSlotPortStart = 11900 // slot inbounds; SlotCount pools max (…11931)
+	SlotCount            = 32
 
 	DefaultApiPort = 11932 // gRPC api (dokodemo-door) default
 	ApiTag         = "api"
@@ -23,6 +22,22 @@ const (
 // (the user's em-wall) already holds 11932. Config generation and every
 // `xray api` call read this same value, so they stay consistent per process.
 var ApiPort = DefaultApiPort
+
+// Metrics endpoint (xray's expvar HTTP server, loopback only). Its
+// /debug/vars carries the burst observatory's per-outbound health (alive,
+// delay, ping counts) — the only per-node health the api CLI doesn't expose —
+// which the daemon polls to park dead pool nodes.
+const (
+	DefaultMetricsPort = 11933
+	MetricsTag         = "metrics"
+)
+
+// MetricsPort is a var for the same reason as ApiPort.
+var MetricsPort = DefaultMetricsPort
+
+// SlotPortStart is the first slot inbound port (a var for the same reason as
+// ApiPort: tests run a real xray on free ports, never the live ones).
+var SlotPortStart = DefaultSlotPortStart
 
 // AssignInboundPorts allocates a stable listen port to every enabled TCP inbound
 // that lacks one (Port==0), choosing the lowest free port in [PortStart,PortEnd]

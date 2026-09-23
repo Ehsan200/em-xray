@@ -18,7 +18,7 @@ func entryCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "entry") },
 	}
 	c.AddCommand(entryAddCmd(), entryListCmd(), entryRemoveCmd(), entryRenameCmd(),
-		entryDuplicateCmd(), entryEditCmd(), entryTestCmd())
+		entryDuplicateCmd(), entryEditCmd(), entryTestCmd(), entryMuxCmd())
 	return c
 }
 
@@ -102,6 +102,7 @@ func entryRenameCmd() *cobra.Command {
 
 func entryAddCmd() *cobra.Command {
 	var link, outbound, dialer string
+	var mux bool
 	c := &cobra.Command{
 		Use:   "add [name]",
 		Short: "add an outbound from a share link or raw JSON (--dialer makes it a master)",
@@ -122,7 +123,7 @@ func entryAddCmd() *cobra.Command {
 			}
 			defer conn.Close()
 			reply, err := client.EntryAdd(ctx, &emxv1.EntryAddRequest{
-				Name: name, Link: link, OutboundJson: outbound, Dialer: dialer,
+				Name: name, Link: link, OutboundJson: outbound, Dialer: dialer, Mux: mux,
 			})
 			if err != nil {
 				return err
@@ -133,12 +134,16 @@ func entryAddCmd() *cobra.Command {
 				kind = "master"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "added %s %q (id %d)\n", kind, e.Name, e.Id)
+			if mux && e.MuxNote != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "mux stored but inactive: %s\n", e.MuxNote)
+			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&link, "link", "", "vless/vmess/trojan/ss/hysteria2 share link")
 	c.Flags().StringVar(&outbound, "outbound", "", "raw outbound JSON")
 	c.Flags().StringVar(&dialer, "dialer", "", "dialer refs (xray:N,xraysub:N,proxy:N) — makes a master")
+	c.Flags().BoolVar(&mux, "mux", false, "multiplex connections over a few tunnels (see `emx entry mux`)")
 	return c
 }
 
@@ -160,13 +165,13 @@ func entryListCmd() *cobra.Command {
 				return err
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tNAME\tKIND\tENABLED\tDIALER")
+			fmt.Fprintln(tw, "ID\tNAME\tKIND\tENABLED\tMUX\tDIALER")
 			for _, e := range reply.Entries {
 				kind := "entry"
 				if e.IsMaster {
 					kind = "master"
 				}
-				fmt.Fprintf(tw, "%d\t%s\t%s\t%v\t%s\n", e.Id, e.Name, kind, e.Enabled, e.Dialer)
+				fmt.Fprintf(tw, "%d\t%s\t%s\t%v\t%s\t%s\n", e.Id, e.Name, kind, e.Enabled, muxLabel(e), e.Dialer)
 			}
 			return tw.Flush()
 		},
@@ -197,5 +202,54 @@ func entryRemoveCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), "removed")
 			return nil
 		},
+	}
+}
+
+func entryMuxCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mux <id> on|off",
+		Short: "multiplex connections through an entry over a few long-lived tunnels",
+		Long: "With mux, new connections through the entry start as streams inside an\n" +
+			"existing tunnel — no fresh TCP/TLS/WebSocket handshake — at the cost of\n" +
+			"shared fate: a broken tunnel drops every stream on it. Applies to VMess,\n" +
+			"VLESS (without an XTLS flow) and Trojan over non-multiplexing transports;\n" +
+			"`emx entry ls` shows why it doesn't apply to an entry.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			var on bool
+			switch args[1] {
+			case "on", "true", "1":
+				on = true
+			case "off", "false", "0":
+			default:
+				return fmt.Errorf("want on or off, got %q", args[1])
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.EntrySetMux(ctx, &emxv1.SetEnabledRequest{Id: id, Enabled: on})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: mux %s\n", reply.Entry.Name, muxLabel(reply.Entry))
+				return nil
+			})
+		},
+	}
+}
+
+// muxLabel renders an entry's mux state: on/off, or why it can't apply.
+func muxLabel(e *emxv1.EntryInfo) string {
+	switch {
+	case e.MuxNote != "" && e.Mux:
+		return "on (inactive: " + e.MuxNote + ")"
+	case e.MuxNote != "":
+		return "n/a"
+	case e.Mux:
+		return "on"
+	default:
+		return "off"
 	}
 }

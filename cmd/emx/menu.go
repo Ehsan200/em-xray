@@ -722,11 +722,19 @@ func (s *menuSession) nodesMenu(sub *emxv1.SubInfo) {
 			if n.LatencyMs > 0 {
 				lat = fmt.Sprintf("%dms", n.LatencyMs)
 			}
+			if n.ParkedUntil != 0 {
+				icon = "z"
+				lat = strings.TrimSpace(lat + " " + parkedLabel(n.ParkedUntil))
+			}
+			if n.Rejected != "" {
+				icon = "!"
+				lat = "refused by xray: " + n.Rejected
+			}
 			items = append(items, selectItem{label: fmt.Sprintf("%s %s", icon, n.Name), desc: lat})
 		}
 		items = append(items, selectItem{label: "⚡ Test all nodes"}, selectItem{label: "← Back"})
 
-		i, ok := runSelect(fmt.Sprintf("%s — nodes (✓ active · ✗ disabled)", sub.Name), items)
+		i, ok := runSelect(fmt.Sprintf("%s — nodes (✓ active · ✗ disabled · z parked dead · ! refused)", sub.Name), items)
 		if !ok || i == len(items)-1 {
 			return
 		}
@@ -820,11 +828,16 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 	if e.IsMaster {
 		kind = "master → " + e.Dialer
 	}
+	muxDesc := "mux: " + muxLabel(e)
+	if e.MuxNote != "" {
+		muxDesc += " — " + e.MuxNote
+	}
 	i, ok := runSelect(fmt.Sprintf("%s (%s)", e.Name, kind), []selectItem{
 		{"Test", "measure real latency through this outbound"},
-		{"Rename", ""}, {"Duplicate", ""}, {"Edit JSON", ""}, {"Remove", ""}, {"← Back", ""},
+		{"Rename", ""}, {"Duplicate", ""}, {"Edit JSON", ""}, {"Remove", ""},
+		{"Toggle mux", muxDesc}, {"← Back", ""},
 	})
-	if !ok || i == 5 {
+	if !ok || i == 6 {
 		return
 	}
 	switch i {
@@ -873,6 +886,15 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 			} else {
 				notify("removed %s", e.Name)
 			}
+		}
+	case 5:
+		ctx, cancel := call()
+		reply, err := s.c.EntrySetMux(ctx, &emxv1.SetEnabledRequest{Id: e.Id, Enabled: !e.Mux})
+		cancel()
+		if err != nil {
+			notify("error: %v", err)
+		} else {
+			notify("%s: mux %s", e.Name, muxLabel(reply.Entry))
 		}
 	}
 }
@@ -1053,10 +1075,13 @@ func (s *menuSession) statusView() {
 	if wins, err := s.c.Winners(wctx, &emxv1.Empty{}); err == nil {
 		for _, w := range wins.Winners {
 			node := w.Node
+			if len(w.Nodes) > 0 {
+				node = strings.Join(w.Nodes, ", ")
+			}
 			if node == "" {
 				node = "(selecting…)"
 			}
-			items = append(items, selectItem{label: "master " + w.Master, desc: "fastest: " + node})
+			items = append(items, selectItem{label: "master " + w.Master, desc: "via: " + node})
 		}
 	}
 	wcancel()

@@ -141,6 +141,7 @@ func itoa(n int) string {
 // leaves masters fail-closed until a fresh probe lands — so a gratuitous
 // restart is a small outage, not just churn.
 func TestReconcileSkipsRestartOnIdenticalConfig(t *testing.T) {
+	useFreeXrayPorts(t) // live-apply api calls must never reach a real xray
 	dir := t.TempDir()
 	p := paths.Paths{Data: dir, Config: dir, State: dir, Cache: dir, Runtime: dir}
 	if err := p.EnsureDirs(); err != nil {
@@ -168,7 +169,7 @@ func TestReconcileSkipsRestartOnIdenticalConfig(t *testing.T) {
 	sup := NewSupervisor(store, p, log.New(io.Discard, "", 0))
 	sup.wd = NewWatchdog(func() (*exec.Cmd, error) {
 		starts.Add(1)
-		return exec.Command("sh", "-c", "sleep 30"), nil
+		return exec.Command("sh", "-c", "exec sleep 30"), nil
 	}, log.New(io.Discard, "", 0))
 	defer sup.Stop()
 
