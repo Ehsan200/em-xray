@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -130,8 +131,10 @@ func TestDownloadOutlivesSlowLink(t *testing.T) {
 	defer srv.Close()
 
 	var lastDone, lastTotal int64
-	got, err := download(context.Background(), srv.Client(), srv.URL,
-		func(done, total int64) { lastDone, lastTotal = done, total }, 2*time.Second)
+	var buf bytes.Buffer
+	err := download(context.Background(), srv.Client(), srv.URL,
+		func(done, total int64) { lastDone, lastTotal = done, total }, 2*time.Second, &buf)
+	got := buf.Bytes()
 	if err != nil {
 		t.Fatalf("slow-but-live download failed: %v", err)
 	}
@@ -159,7 +162,7 @@ func TestDownloadStallFailsFast(t *testing.T) {
 	defer close(release)
 
 	start := time.Now()
-	_, err := download(context.Background(), srv.Client(), srv.URL, nil, 300*time.Millisecond)
+	err := download(context.Background(), srv.Client(), srv.URL, nil, 300*time.Millisecond, io.Discard)
 	if err == nil {
 		t.Fatal("a silent connection must fail")
 	}
@@ -257,7 +260,7 @@ func TestProxyCredentialsReachAnHTTPProxy(t *testing.T) {
 	}
 	// Plain http target so the proxy handles it as an absolute-URI request
 	// rather than a CONNECT tunnel.
-	if _, err := download(context.Background(), cl, "http://example.invalid/emx.tar.gz", nil, 5*time.Second); err != nil {
+	if err := download(context.Background(), cl, "http://example.invalid/emx.tar.gz", nil, 5*time.Second, io.Discard); err != nil {
 		t.Fatalf("download through authenticated proxy: %v", err)
 	}
 	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret"))

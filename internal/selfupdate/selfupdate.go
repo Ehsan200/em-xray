@@ -227,28 +227,46 @@ func parseVer(v string) ([3]int, bool) {
 // any long-running process (the daemon) afterwards. progress, if non-nil, is
 // called as bytes arrive; total is -1 when the server sends no Content-Length.
 func Apply(ctx context.Context, c *http.Client, url string, progress func(done, total int64)) error {
-	bin, err := downloadBinary(ctx, c, url, progress)
+	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	return replaceSelf(bin)
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	// Stream the binary straight into a temp file beside the executable, then
+	// rename it over: holding ~90 MB in memory got the updater OOM-killed on
+	// small VPSes already running the daemon and xray.
+	dir := filepath.Dir(exe)
+	tmp, err := os.CreateTemp(dir, ".emx-update-*")
+	if err != nil {
+		return fmt.Errorf("cannot write to %s (need write permission): %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if err := download(ctx, c, url, progress, stallTimeout, tmp); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, exe)
 }
 
-// downloadBinary fetches a .tar.gz and returns the bytes of the `emx` entry.
+// download fetches the .tar.gz at url and writes its `emx` entry to dst,
+// streaming — nothing is held in memory.
 //
 // The release tarball is tens of megabytes, and the boxes emx runs on are
 // exactly the ones with slow or shaped links. So the transfer is bounded by
 // PROGRESS, not by a stopwatch: a separate timer cancels the request only when
-// no bytes have arrived for stallTimeout. A download creeping along at 50 KiB/s
+// no bytes have arrived for stallAfter. A download creeping along at 50 KiB/s
 // finishes; a connection that dies mid-body fails within a minute instead of
 // hanging until the caller's deadline.
-func downloadBinary(ctx context.Context, c *http.Client, url string, progress func(done, total int64)) ([]byte, error) {
-	return download(ctx, c, url, progress, stallTimeout)
-}
-
-// download is downloadBinary with the stall window injected, so tests can use a
-// window shorter than a minute.
-func download(ctx context.Context, c *http.Client, url string, progress func(done, total int64), stallAfter time.Duration) ([]byte, error) {
+func download(ctx context.Context, c *http.Client, url string, progress func(done, total int64), stallAfter time.Duration, dst io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -261,15 +279,15 @@ func download(ctx context.Context, c *http.Client, url string, progress func(don
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	resp, err := client(c).Do(req)
 	if err != nil {
-		return nil, downloadErr(err, &stalled)
+		return downloadErr(err, &stalled)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download: %s", resp.Status)
+		return fmt.Errorf("download: %s", resp.Status)
 	}
 
 	body := &progressReader{
@@ -280,24 +298,23 @@ func download(ctx context.Context, c *http.Client, url string, progress func(don
 	}
 	gz, err := gzip.NewReader(body)
 	if err != nil {
-		return nil, downloadErr(err, &stalled)
+		return downloadErr(err, &stalled)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
-			return nil, fmt.Errorf("archive has no emx binary")
+			return fmt.Errorf("archive has no emx binary")
 		}
 		if err != nil {
-			return nil, downloadErr(err, &stalled)
+			return downloadErr(err, &stalled)
 		}
 		if h.Typeflag == tar.TypeReg && filepath.Base(h.Name) == "emx" {
-			b, err := io.ReadAll(io.LimitReader(tr, maxDownload))
-			if err != nil {
-				return nil, downloadErr(err, &stalled)
+			if _, err := io.Copy(dst, io.LimitReader(tr, maxDownload)); err != nil {
+				return downloadErr(err, &stalled)
 			}
-			return b, nil
+			return nil
 		}
 	}
 }
@@ -333,34 +350,4 @@ func (p *progressReader) Read(b []byte) (int, error) {
 		}
 	}
 	return n, err
-}
-
-// replaceSelf writes data over the running executable via a same-dir temp file
-// + atomic rename (unix allows replacing the file of a running process).
-func replaceSelf(data []byte) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	dir := filepath.Dir(exe)
-	tmp, err := os.CreateTemp(dir, ".emx-update-*")
-	if err != nil {
-		return fmt.Errorf("cannot write to %s (need write permission): %w", dir, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, exe)
 }
