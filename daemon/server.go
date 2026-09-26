@@ -57,6 +57,9 @@ func (s *Server) Ping(context.Context, *emxv1.PingRequest) (*emxv1.PingReply, er
 
 func (s *Server) Status(context.Context, *emxv1.StatusRequest) (*emxv1.StatusReply, error) {
 	running, pid, restarts, lastErr := s.sup.XrayState()
+	if !running {
+		lastErr = s.sup.DownReason(lastErr)
+	}
 	healthChecked, responsive, healthMessage, healthRestarts, checkedAt := s.sup.XrayHealth()
 	var checkedUnix int64
 	if !checkedAt.IsZero() {

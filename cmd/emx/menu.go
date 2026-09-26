@@ -1060,6 +1060,9 @@ func (s *menuSession) statusView() {
 		return
 	}
 	xray := "stopped"
+	if st.Xray != nil && st.Xray.LastError != "" {
+		xray += " — " + st.Xray.LastError
+	}
 	if st.Xray != nil && st.Xray.Running {
 		health := "health pending"
 		if st.Xray.HealthChecked && st.Xray.Responsive {

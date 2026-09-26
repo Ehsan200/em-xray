@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -110,6 +112,9 @@ func (w *Watchdog) supervise() {
 			w.restarts++
 			if waitErr != nil {
 				w.lastErr = waitErr.Error()
+				if t, ok := cmd.Stderr.(interface{ Tail() string }); ok && t.Tail() != "" {
+					w.lastErr += ": " + t.Tail()
+				}
 			}
 		}
 		w.mu.Unlock()
@@ -221,4 +226,46 @@ func nextBackoff(cur time.Duration) time.Duration {
 		return backoffMax
 	}
 	return n
+}
+
+// tailWriter passes output through to w (if any) and keeps the last
+// non-empty line, so a child that dies on startup can say why.
+type tailWriter struct {
+	w    io.Writer
+	mu   sync.Mutex
+	buf  []byte
+	last string
+}
+
+func (t *tailWriter) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	t.buf = append(t.buf, p...)
+	for {
+		i := strings.IndexByte(string(t.buf), '\n')
+		if i < 0 {
+			break
+		}
+		if line := strings.TrimSpace(string(t.buf[:i])); line != "" {
+			t.last = line
+		}
+		t.buf = t.buf[i+1:]
+	}
+	if len(t.buf) > 4096 {
+		t.buf = t.buf[len(t.buf)-4096:]
+	}
+	t.mu.Unlock()
+	if t.w != nil {
+		return t.w.Write(p)
+	}
+	return len(p), nil
+}
+
+// Tail is the last line written (a trailing unterminated one included).
+func (t *tailWriter) Tail() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if line := strings.TrimSpace(string(t.buf)); line != "" {
+		return line
+	}
+	return t.last
 }

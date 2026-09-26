@@ -108,6 +108,36 @@ func (s *Supervisor) activeUsers(inboundID uint) []xray.InboundUser {
 }
 
 func (s *Supervisor) reconcileLocked() error {
+	err := s.reconcileOnceLocked()
+	if err != nil {
+		s.startLastGoodLocked()
+	}
+	return err
+}
+
+// startLastGoodLocked keeps xray up when the current state can't be applied
+// (xray refuses the generated config, generation fails): if nothing is
+// running, it starts xray on config.json — the last config that passed
+// validation — rather than leaving the box without its listeners. The next
+// successful reconcile brings it to current state like any other change.
+func (s *Supervisor) startLastGoodLocked() {
+	if s.wd.IsStarted() {
+		return
+	}
+	inbounds, err := s.store.ListInbounds()
+	if err != nil || !routable(inbounds) {
+		return
+	}
+	cfg, err := os.ReadFile(s.paths.XrayConfig())
+	if err != nil || len(bytes.TrimSpace(cfg)) == 0 {
+		return
+	}
+	s.log.Print("reconcile: current config refused — starting xray on the last applied config")
+	s.wd.Start()
+	s.running, s.loadedSlots = cfg, nil
+}
+
+func (s *Supervisor) reconcileOnceLocked() error {
 	entries, err := s.store.ListEntries()
 	if err != nil {
 		return err
@@ -328,6 +358,23 @@ func (s *Supervisor) RestartXray() (bool, int, error) {
 	}
 }
 
+// DownReason says why xray isn't running, given the watchdog's last error.
+func (s *Supervisor) DownReason(lastErr string) string {
+	if s.wd.IsStarted() {
+		if lastErr == "" {
+			return "starting"
+		}
+		return "restarting after: " + lastErr
+	}
+	if msg := s.ConfigError(); msg != "" {
+		return msg + " (retrying every " + xrayHealthInterval.String() + ")"
+	}
+	if lastErr != "" {
+		return lastErr
+	}
+	return "no enabled inbound with a port (add or enable one)"
+}
+
 // XrayState exposes child health for the Status RPC.
 func (s *Supervisor) XrayState() (running bool, pid int, restarts int32, lastErr string) {
 	return s.wd.State()
@@ -354,6 +401,14 @@ func (s *Supervisor) StartHealthMonitor(ctx context.Context) {
 func (s *Supervisor) checkXrayHealth() {
 	running, _, _, _ := s.wd.State()
 	if !running {
+		// Down without the watchdog looping (startup reconcile refused, no
+		// config yet): keep trying to bring it up. A no-op while nothing is
+		// routable; a crash loop is the watchdog's own business.
+		if !s.wd.IsStarted() {
+			if err := s.Reconcile(); err != nil {
+				s.log.Printf("xray is down, retry failed: %v", err)
+			}
+		}
 		return
 	}
 	_, err := s.StatsQuery()
@@ -571,15 +626,19 @@ func xrayCmdFactory(p paths.Paths, logger *log.Logger) CmdFactory {
 		if _, err := os.Stat(p.XrayConfig()); err != nil {
 			return nil, fmt.Errorf("no xray config yet: %w", err)
 		}
+		clearStaleSockets(p.XrayConfig(), logger, func() []int { return ReapMainXray(p, logger) })
 		cmd := exec.Command(bin, "run", "-c", p.XrayConfig())
 		dieWithParent(cmd) // never outlive the daemon and keep holding the ports
 		cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+p.AssetDir())
 		// xray writes its own access/error logs (paths baked into config); its
 		// stdout/stderr go to the daemon error log for startup diagnostics.
+		// The tail also rides along so a failed start says why in Status.
+		out := &tailWriter{}
 		if errLog, err := os.OpenFile(p.ErrorLog(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-			cmd.Stdout = errLog
-			cmd.Stderr = errLog
+			out.w = errLog
 		}
+		cmd.Stdout = out
+		cmd.Stderr = out
 		return cmd, nil
 	}
 }

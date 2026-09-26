@@ -44,7 +44,12 @@ func StrayXray(p paths.Paths, keep ...int) []int {
 
 // ReapStrayXray terminates every stray and returns the pids it signalled.
 func ReapStrayXray(p paths.Paths, logger *log.Logger, keep ...int) []int {
-	strays := StrayXray(p, keep...)
+	return terminate(StrayXray(p, keep...), logger)
+}
+
+// terminate SIGTERMs pids, SIGKILLs any still alive after reapGrace, and
+// returns pids.
+func terminate(strays []int, logger *log.Logger) []int {
 	for _, pid := range strays {
 		if logger != nil {
 			logger.Printf("terminating orphaned xray (pid %d) still holding emx ports", pid)
@@ -70,6 +75,43 @@ func ReapStrayXray(p paths.Paths, logger *log.Logger, keep ...int) []int {
 		}
 	}
 	return strays
+}
+
+// ReapMainXray terminates emx xray processes serving the daemon's own
+// config.json — only called right before the watchdog spawns its child, when
+// its previous child has already exited, so any match is a leftover still
+// holding the listeners. Throwaway probe/-test runs use other configs and
+// are never touched.
+func ReapMainXray(p paths.Paths, logger *log.Logger) []int {
+	var main []int
+	for _, pid := range StrayXray(p) {
+		if hasArg(pid, p.XrayConfig()) {
+			main = append(main, pid)
+		}
+	}
+	return terminate(main, logger)
+}
+
+// hasArg reports whether pid was started with arg on its command line.
+func hasArg(pid int, arg string) bool {
+	if b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline")); err == nil {
+		for _, a := range bytes.Split(b, []byte{0}) {
+			if string(a) == arg {
+				return true
+			}
+		}
+		return false
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+	if err != nil {
+		return false
+	}
+	for _, f := range strings.Fields(string(out)) {
+		if f == arg {
+			return true
+		}
+	}
+	return false
 }
 
 func anyAlive(pids []int) bool {
