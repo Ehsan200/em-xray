@@ -179,6 +179,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			// A member that doesn't tunnel is skipped (the resolver already
 			// drops and logs it): it would egress from this box.
 			fallback := "block"
+			loaded := map[string]bool{}
 			for _, m := range s.Members {
 				if CheckMemberOutbound(m.Outbound) != nil {
 					continue
@@ -190,7 +191,20 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 				if fallback == "block" {
 					fallback = SlotMemberTag(idx, m.Key)
 				}
+				loaded[m.Key] = true
 				outbounds = append(outbounds, mo)
+			}
+			// Daemon-picked members narrow the selector (full tags); best is fallback.
+			selector := []any{SlotOutPrefix(idx)}
+			var picked []any
+			for _, k := range s.Picked {
+				if loaded[k] {
+					picked = append(picked, SlotMemberTag(idx, k))
+				}
+			}
+			if len(picked) > 0 {
+				selector = picked
+				fallback = picked[0].(string)
 			}
 			// leastLoad over the prefix reads the burst observatory's rolling
 			// ping window and spreads connections over the best
@@ -206,7 +220,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			// guarantees it tunnels — so this is not a leak. Only an empty
 			// pool falls back to `block`, keeping the master fail-closed.
 			balancers = append(balancers, map[string]any{
-				"tag": SlotBalTag(idx), "selector": []any{SlotOutPrefix(idx)},
+				"tag": SlotBalTag(idx), "selector": selector,
 				"strategy": map[string]any{
 					"type":     "leastLoad",
 					"settings": map[string]any{"expected": SlotBalancerExpected},

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,7 +34,7 @@ import (
 // link returns. State is in memory; a daemon restart re-trials everything.
 
 const (
-	nodeHealthPollInterval = 30 * time.Second
+	nodeHealthPollInterval = 10 * time.Second
 	nodeDeadBeforePark     = 15 * time.Minute
 	nodeTrialWindow        = 3 * time.Minute
 	nodeParkInitial        = 30 * time.Minute
@@ -42,7 +43,8 @@ const (
 
 // nodeStatus is one outbound's entry in xray's /debug/vars "observatory".
 type nodeStatus struct {
-	Alive      bool `json:"alive"`
+	Alive      bool  `json:"alive"`
+	Delay      int64 `json:"delay"` // ms, average of successful pings
 	HealthPing struct {
 		All  int `json:"all"`
 		Fail int `json:"fail"`
@@ -265,15 +267,19 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 		return
 	}
 	var events []parkEvent
+	repick := false
 	if len(slots) > 0 {
 		byTag, err := fetchObservatory(ctx, "127.0.0.1:"+strconv.Itoa(xray.MetricsPort))
 		if err != nil {
 			return // metrics not up yet (first seconds after a start)
 		}
 		events = s.parker.observe(slots, byTag)
+		if s.picker.observe(slots, byTag) {
+			repick = s.repicked(slots)
+		}
 	}
 	events = append(events, s.parker.release()...)
-	if len(events) == 0 {
+	if len(events) == 0 && !repick {
 		return
 	}
 	for _, e := range events {
@@ -285,8 +291,27 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 		}
 	}
 	if err := s.Reconcile(); err != nil {
-		s.log.Printf("apply node parking: %v", err)
+		s.log.Printf("apply node health: %v", err)
 	}
+}
+
+// repicked reports whether the scores now pick differently for any loaded
+// pool, logging the new pick.
+func (s *Supervisor) repicked(slots []xray.Slot) bool {
+	changed := false
+	for _, sl := range slots {
+		now := s.picker.pick(sl.Index, sl.Members, sl.Picked)
+		if samePick(now, sl.Picked) {
+			continue
+		}
+		changed = true
+		names := make([]string, len(now))
+		for i, k := range now {
+			names[i] = s.memberName(k)
+		}
+		s.log.Printf("pool %s now uses: %s", sl.Master, strings.Join(names, ", "))
+	}
+	return changed
 }
 
 func fetchObservatory(ctx context.Context, addr string) (map[string]nodeStatus, error) {

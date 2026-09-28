@@ -186,7 +186,8 @@ func TestParkDeadNodeAgainstRealXray(t *testing.T) {
 	// Fast-forward the parker past the dead window and poll.
 	now := time.Now()
 	sup.parker.now = func() time.Time { return now }
-	sup.PollNodeHealth(context.Background()) // first dead sighting
+	sup.PollNodeHealth(context.Background()) // first dead sighting (also picks)
+	_, live0 := sup.Counters()
 	now = now.Add(nodeDeadBeforePark)
 	sup.PollNodeHealth(context.Background())
 	if _, ok := sup.ParkedNodes()["xray-dead"]; !ok {
@@ -195,7 +196,7 @@ func TestParkDeadNodeAgainstRealXray(t *testing.T) {
 	if n := len(sup.loadedSlots[0].Members); n != 1 {
 		t.Fatalf("pool = %d members after parking, want 1", n)
 	}
-	if restarts, live := sup.Counters(); restarts != 0 || live != 1 {
+	if restarts, live := sup.Counters(); restarts != 0 || live-live0 != 1 {
 		t.Fatalf("parking: restarts %d, live applies %d; want 0 and 1", restarts, live)
 	}
 }

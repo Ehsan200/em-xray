@@ -299,3 +299,26 @@ func TestDialerGroupKeyOrderInsensitive(t *testing.T) {
 		t.Error("different ref sets must not share a key")
 	}
 }
+
+func TestMemberOutboundStallTimeouts(t *testing.T) {
+	ob, err := MemberOutboundJSON(0, SlotMember{Key: "k", Outbound: `{"protocol":"vless","streamSettings":{"network":"ws","sockopt":{"tcpUserTimeout":5000}}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so := ob["streamSettings"].(map[string]any)["sockopt"].(map[string]any)
+	if so["tcpUserTimeout"] != float64(5000) {
+		t.Errorf("node's own tcpUserTimeout overwritten: %v", so["tcpUserTimeout"])
+	}
+	if so["tcpKeepAliveIdle"] != memberTCPKeepAliveIdle || so["tcpKeepAliveInterval"] != memberTCPKeepAliveIntvl {
+		t.Errorf("keepalive not set: %v", so)
+	}
+
+	ob, err = MemberOutboundJSON(0, SlotMember{Key: "k", Outbound: `{"protocol":"vless"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so = ob["streamSettings"].(map[string]any)["sockopt"].(map[string]any)
+	if so["tcpUserTimeout"] != memberTCPUserTimeoutMs {
+		t.Errorf("tcpUserTimeout not set: %v", so)
+	}
+}

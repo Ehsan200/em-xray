@@ -51,6 +51,7 @@ type Supervisor struct {
 	liveApplies atomic.Int32
 	// parker leaves dead pool nodes out of their slot (see nodepark.go).
 	parker *nodeParker
+	picker *nodePicker // ranks pool members (nodepick.go)
 	// rejected are pool members xray refused (see validate.go).
 	rejectedMu sync.Mutex
 	rejected   map[string]rejection
@@ -68,7 +69,7 @@ const (
 )
 
 func NewSupervisor(store *xray.Store, p paths.Paths, logger *log.Logger) *Supervisor {
-	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), rejected: map[string]rejection{}}
+	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), picker: newNodePicker(), rejected: map[string]rejection{}}
 	s.wd = NewWatchdog(xrayCmdFactory(p, logger), logger)
 	return s
 }
@@ -517,7 +518,9 @@ func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, 
 		slotByKey[key] = len(slots)
 		slots = append(slots, xray.Slot{Master: e.Name, Key: key, Index: -1, Members: members})
 	}
-	return s.assignSlotIndices(slots), nil
+	slots = s.assignSlotIndices(slots)
+	s.picker.pickSlots(slots, s.loadedSlots)
+	return slots, nil
 }
 
 // assignSlotIndices gives every pool a slot index, keeping the one it had on

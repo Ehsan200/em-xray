@@ -169,6 +169,7 @@ type Slot struct {
 	Key     string // DialerGroupKey of the refs the slot serves
 	Index   int
 	Members []SlotMember
+	Picked  []string // member keys the balancer uses, best (fallback) first; empty = all
 }
 
 // SlotMasters returns every master wired to the slot, owner first.
@@ -253,5 +254,37 @@ func MemberOutboundJSON(idx int, m SlotMember) (map[string]any, error) {
 	ob["tag"] = SlotMemberTag(idx, m.Key)
 	healXHTTPExtra(ob)
 	healAllowInsecure(ob)
+	setStallTimeouts(ob)
 	return ob, nil
+}
+
+// Stall timeouts for member sockets: a black-holed node otherwise hangs its
+// connections until the kernel gives up (minutes) instead of failing over.
+const (
+	memberTCPUserTimeoutMs  = 15000
+	memberTCPKeepAliveIdle  = 30
+	memberTCPKeepAliveIntvl = 10
+)
+
+// setStallTimeouts sets them unless the node's outbound already does.
+func setStallTimeouts(ob map[string]any) {
+	ss, ok := ob["streamSettings"].(map[string]any)
+	if !ok {
+		ss = map[string]any{}
+		ob["streamSettings"] = ss
+	}
+	so, ok := ss["sockopt"].(map[string]any)
+	if !ok {
+		so = map[string]any{}
+		ss["sockopt"] = so
+	}
+	for k, v := range map[string]any{
+		"tcpUserTimeout":       memberTCPUserTimeoutMs,
+		"tcpKeepAliveIdle":     memberTCPKeepAliveIdle,
+		"tcpKeepAliveInterval": memberTCPKeepAliveIntvl,
+	} {
+		if _, set := so[k]; !set {
+			so[k] = v
+		}
+	}
 }
