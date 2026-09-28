@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 )
@@ -211,6 +212,22 @@ func SlotBalTag(idx int) string      { return fmt.Sprintf("slot%d-bal", idx) }
 func SlotOutPrefix(idx int) string   { return fmt.Sprintf("slot%d-out-", idx) }
 func SlotPort(idx int) int           { return SlotPortStart + idx }
 func DialerTag(master string) string { return "dialer-" + sanitizeKey(master) }
+
+// DialerSourceAddr is the loopback address a master's dialer hop connects
+// from (GenOptions.DialerSource). Every connection the master makes into its
+// slot carries it, so when the master's dialer changes the daemon can close
+// exactly that master's old connections (daemon/sockcut_linux.go) and the
+// apps behind them reconnect onto the new path, while every other master's
+// connections are left alone. It lies in 127.64.0.0/10, so never 127.0.0.1 or
+// a resolver stub address, and is derived from the name, so it survives
+// restarts and slot moves. Two masters colliding on its 22 bits would only
+// share a cut.
+func DialerSourceAddr(master string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(master))
+	v := h.Sum32()
+	return fmt.Sprintf("127.%d.%d.%d", 64+((v>>16)&63), (v>>8)&255, v&255)
+}
 
 // SlotMemberTag is the tag of a member outbound within a slot. The shared
 // prefix (slotN-out-) is what lets the balancer + observatory adopt live-added

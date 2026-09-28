@@ -297,6 +297,16 @@ Connections through anything that didn't change are untouched. A restart happens
 
 `emx status` shows how many changes went live vs. needed a restart.
 
+**A master's dialer change moves its clients at once.** xray never moves a connection that is
+already open, so after a master's dialer changes its old connections would keep riding the old
+pool (and hang until the idle timeout if that pool is dead). On Linux each master's dialer hop
+leaves from its own loopback address (`127.64.0.0/10`, derived from its name), so right after the
+live apply the daemon closes exactly that master's old connections: socket destroy
+(`CONFIG_INET_DIAG_DESTROY`, like `ss -K`), or on kernels without it `pidfd_getfd` + shutdown on
+xray's sockets. The apps behind them reconnect within a second, onto the new dialer; the client's
+VPN stays up, and every other master's connections — including masters sharing the old pool — are
+untouched.
+
 ### Fail closed, never direct
 
 An inbound routed through a master must never egress from this box's IP. The rules:

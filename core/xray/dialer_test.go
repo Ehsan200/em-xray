@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -320,5 +321,56 @@ func TestMemberOutboundStallTimeouts(t *testing.T) {
 	so = ob["streamSettings"].(map[string]any)["sockopt"].(map[string]any)
 	if so["tcpUserTimeout"] != memberTCPUserTimeoutMs {
 		t.Errorf("tcpUserTimeout not set: %v", so)
+	}
+}
+
+// Each master's dialer hop leaves from its own loopback address, so the daemon
+// can close exactly one master's connections; never 127.0.0.1.
+func TestDialerSource(t *testing.T) {
+	entries := []XrayEntry{
+		{Name: "M", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`},
+		{Name: "M2", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`},
+	}
+	slots := []Slot{{Master: "M", Aliases: []string{"M2"}, Members: []SlotMember{
+		{Key: "abc123", Outbound: `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.4","port":1080}]}}`},
+	}}}
+	sendThrough := func(opts GenOptions) map[string]any {
+		t.Helper()
+		b, err := Generate(entries, nil, slots, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]any{}
+		for _, o := range dig(t, om(t, b), "outbounds").([]any) {
+			ob := o.(map[string]any)
+			if tag := ob["tag"].(string); strings.HasPrefix(tag, "dialer-") {
+				got[tag] = ob["sendThrough"]
+			}
+		}
+		return got
+	}
+	for tag, v := range sendThrough(GenOptions{}) {
+		if v != nil {
+			t.Errorf("%s: sendThrough %v without DialerSource", tag, v)
+		}
+	}
+	got := sendThrough(GenOptions{DialerSource: true})
+	for _, master := range []string{"M", "M2"} {
+		if got[DialerTag(master)] != DialerSourceAddr(master) {
+			t.Errorf("%s: sendThrough = %v, want %s", master, got[DialerTag(master)], DialerSourceAddr(master))
+		}
+	}
+	if DialerSourceAddr("M") == DialerSourceAddr("M2") {
+		t.Error("two masters share a source address")
+	}
+	for _, name := range []string{"M", "M2", "", "a-very-long-master-name"} {
+		a := DialerSourceAddr(name)
+		if !strings.HasPrefix(a, "127.") || a == "127.0.0.1" || DialerSourceAddr(name) != a {
+			t.Errorf("DialerSourceAddr(%q) = %s", name, a)
+		}
+		var o2 int
+		if _, err := fmt.Sscanf(a, "127.%d.", &o2); err != nil || o2 < 64 || o2 > 127 {
+			t.Errorf("DialerSourceAddr(%q) = %s, want 127.64.0.0/10", name, a)
+		}
 	}
 }

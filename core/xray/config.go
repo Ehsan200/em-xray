@@ -16,6 +16,10 @@ type GenOptions struct {
 	LogLevel      string // default "warning"
 	ProbeInterval string // burst-observatory ping cadence, e.g. "30s"; default DefaultProbeInterval
 	ProbeURL      string // ping destination; default DefaultProbeURL
+	// DialerSource binds each master's dialer hop to its own loopback address
+	// (DialerSourceAddr). Linux only: there every 127/8 address is local,
+	// while macOS has just 127.0.0.1 and the bind would fail.
+	DialerSource bool
 }
 
 // Generate builds the full xray config.json from entries (outbounds), inbounds
@@ -168,12 +172,16 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			// one stable dialer outbound per master (owner + aliases), all
 			// into the same slot inbound
 			for _, master := range s.SlotMasters() {
-				outbounds = append(outbounds, map[string]any{
+				dialer := map[string]any{
 					"tag": DialerTag(master), "protocol": "socks",
 					"settings": map[string]any{"servers": []any{
 						map[string]any{"address": "127.0.0.1", "port": SlotPort(idx)},
 					}},
-				})
+				}
+				if opts.DialerSource {
+					dialer["sendThrough"] = DialerSourceAddr(master)
+				}
+				outbounds = append(outbounds, dialer)
 			}
 			// member outbounds (shared slotN-out- prefix → live-adoptable).
 			// A member that doesn't tunnel is skipped (the resolver already

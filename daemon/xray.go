@@ -172,6 +172,7 @@ func (s *Supervisor) reconcileOnceLocked() error {
 			LogLevel:      s.store.LogLevel(),
 			ProbeInterval: strconv.Itoa(s.store.ProbeIntervalSec()) + "s",
 			ProbeURL:      s.probeURL,
+			DialerSource:  sockCutSupported,
 		})
 		if err != nil {
 			s.setConfigError(err.Error())
@@ -250,7 +251,10 @@ func (s *Supervisor) applyLocked(inbounds []xray.Inbound, slots []xray.Slot, cfg
 		s.log.Print("reconcile: starting xray")
 		s.wd.Start()
 	case s.running != nil && s.applyLive(cfg):
-		// applied without a restart
+		// Applied without a restart. Connections of a master whose dialer
+		// changed would keep riding the old path: close them so their
+		// clients reconnect through the new one (sockcut.go).
+		s.cutMovedMasters(s.loadedSlots, slots)
 	default:
 		s.log.Print("reconcile: restarting xray with new config")
 		s.restarts.Add(1)
