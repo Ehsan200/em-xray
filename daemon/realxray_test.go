@@ -40,11 +40,15 @@ func needRealXray(t *testing.T) {
 // ports for the duration of the test.
 func useFreeXrayPorts(t *testing.T) {
 	t.Helper()
-	oldAPI, oldSlot, oldMetrics := xray.ApiPort, xray.SlotPortStart, xray.MetricsPort
+	oldAPI, oldSlot, oldMetrics, oldLoop := xray.ApiPort, xray.SlotPortStart, xray.MetricsPort, xray.DirectAllowLoopback
 	xray.ApiPort = freePort(t)
 	xray.MetricsPort = freePort(t)
 	xray.SlotPortStart = freePortRange(t, 4)
-	t.Cleanup(func() { xray.ApiPort, xray.SlotPortStart, xray.MetricsPort = oldAPI, oldSlot, oldMetrics })
+	// Test targets are local servers; xray's freedom blocks those by default.
+	xray.DirectAllowLoopback = true
+	t.Cleanup(func() {
+		xray.ApiPort, xray.SlotPortStart, xray.MetricsPort, xray.DirectAllowLoopback = oldAPI, oldSlot, oldMetrics, oldLoop
+	})
 }
 
 // newRealSupervisor builds a supervisor over a temp store/paths. Its watchdog

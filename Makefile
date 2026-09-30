@@ -8,7 +8,7 @@ BIN        := emx
 PKG        := ./cmd/emx
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS    := -s -w -X main.version=$(VERSION)
-XRAY_VERSION ?= v26.3.27
+XRAY_VERSION ?= v26.9.9
 TARGET     ?= linux-64
 
 GOBIN := $(shell go env GOPATH)/bin

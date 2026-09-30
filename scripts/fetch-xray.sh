@@ -8,11 +8,11 @@
 #   TARGET=macos-arm64 ./scripts/fetch-xray.sh
 #
 # Env:
-#   XRAY_VERSION  release tag (default v26.3.27 — the verified version)
+#   XRAY_VERSION  release tag (default v26.9.9 — the verified version)
 #   TARGET        release asset triple (default linux-64)
 set -euo pipefail
 
-XRAY_VERSION="${XRAY_VERSION:-v26.3.27}"
+XRAY_VERSION="${XRAY_VERSION:-v26.9.9}"
 TARGET="${TARGET:-linux-64}"
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,7 +24,7 @@ echo ">> fetching ${asset} @ ${XRAY_VERSION}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL --retry 3 -o "$tmp/xray.zip" "$url"
+curl -fsSL --retry 5 --retry-all-errors -o "$tmp/xray.zip" "$url"
 unzip -q -o "$tmp/xray.zip" -d "$tmp/x"
 
 mkdir -p "$dest"
