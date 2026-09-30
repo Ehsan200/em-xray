@@ -116,3 +116,55 @@ func TestProbeConfigValidatesWithXray(t *testing.T) {
 		t.Errorf("no 'Configuration OK':\n%s", out)
 	}
 }
+
+// `emx entry test` / `emx sub test` probe many configs in one call. Two
+// hysteria configs for the same server — one with a wrong password — must each
+// get their own verdict: xray's hysteria client would otherwise reuse one QUIC
+// session for both and pass or fail them together.
+func TestProbeHysteriaSameServerKeepsVerdictsApart(t *testing.T) {
+	needRealXray(t)
+	useFreeXrayPorts(t)
+	target := "http://" + startHTTP204(t) + "/generate_204"
+	store, sup := newRealSupervisor(t)
+	in, err := xray.NewInboundFromTemplate("hy", "hysteria2", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Listen, in.Port = "127.0.0.1", freePort(t)
+	if err := store.CreateInbound(in); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.waitAPIReady(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	good := xray.ShareLink(*in, "127.0.0.1")
+	bad := strings.Replace(good, in.HysteriaAuth, "wrongpass", 1)
+	var items []xray.ProbeItem
+	for _, l := range []struct{ name, link string }{{"good", good}, {"bad", bad}, {"good2", good}} {
+		pl, err := xray.ParseLink(l.link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items = append(items, xray.ProbeItem{Name: l.name, Outbound: string(pl.Outbound)})
+	}
+	dir := t.TempDir()
+	bin, err := xraybin.Extract(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 5; round++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		res := xray.ProbeOutbounds(ctx, items, xray.ProbeOptions{
+			Bin: bin, AssetDir: dir, WorkDir: dir, URL: target, Timeout: 5 * time.Second,
+		})
+		cancel()
+		for _, r := range res {
+			if (r.Name == "bad") != (r.Err != nil) {
+				t.Fatalf("round %d: %s got err=%v", round, r.Name, r.Err)
+			}
+		}
+	}
+}

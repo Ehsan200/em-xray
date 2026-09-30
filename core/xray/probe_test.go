@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -150,5 +151,32 @@ func TestSetNodeLatency(t *testing.T) {
 	nodes, _ = s.NodesForSub(sub.ID)
 	if nodes[0].LastLatencyMs != 42 {
 		t.Fatalf("latency after refresh = %d, want 42", nodes[0].LastLatencyMs)
+	}
+}
+
+// Two hysteria nodes on one server:port must never share a throwaway xray
+// (its QUIC session is reused across their different credentials); everything
+// else still packs into as few batches as the size allows.
+func TestPlanProbeBatchesSplitsHysteriaEndpoints(t *testing.T) {
+	hy := func(host string, port int, auth string) string {
+		return fmt.Sprintf(`{"protocol":"hysteria","settings":{"address":%q,"port":%d,"version":2},"streamSettings":{"hysteriaSettings":{"auth":%q}}}`, host, port, auth)
+	}
+	vless := `{"protocol":"vless","settings":{"address":"a.example","port":443}}`
+	items := []ProbeItem{
+		{Name: "h1", Outbound: hy("s.example", 443, "one")},
+		{Name: "h2", Outbound: hy("S.example", 443, "two")}, // same endpoint
+		{Name: "v1", Outbound: vless},
+		{Name: "h3", Outbound: hy("s.example", 8443, "three")}, // other port
+		{Name: "h4", Outbound: hy("s.example", 443, "four")},
+		{Name: "v2", Outbound: vless},
+	}
+	idx := []int{0, 1, 2, 3, 4, 5}
+	got := planProbeBatches(items, idx, 24)
+	want := [][]int{{0, 2, 3, 5}, {1}, {4}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("batches %v, want %v", got, want)
+	}
+	if got := planProbeBatches(items, []int{2, 5, 3}, 2); fmt.Sprint(got) != "[[2 5] [3]]" {
+		t.Fatalf("size cap not kept: %v", got)
 	}
 }

@@ -809,18 +809,37 @@ func (s *menuSession) entriesMenu() {
 			}
 			items = append(items, selectItem{label: e.Name, desc: kind})
 		}
+		n := len(reply.Entries)
+		if n > 0 {
+			items = append(items, selectItem{label: "⚡ Test all entries", desc: "real latency through every entry"})
+		}
 		items = append(items, selectItem{label: "+ Add entry / master"}, selectItem{label: "← Back"})
 
 		i, ok := runSelect("Entries", items)
-		if !ok || i == len(items)-1 {
+		switch {
+		case !ok || i == len(items)-1:
 			return
-		}
-		if i == len(items)-2 {
+		case i == len(items)-2:
 			s.entryAdd()
-			continue
+		case i == n:
+			s.testEntries()
+		default:
+			s.entryActions(reply.Entries[i])
 		}
-		s.entryActions(reply.Entries[i])
 	}
+}
+
+// testEntries probes every entry and prints the table, like `emx entry test`.
+func (s *menuSession) testEntries() {
+	notify("testing all entries…")
+	ctx, cancel := testCall()
+	reply, err := s.c.Test(ctx, &emxv1.TestRequest{Kind: "entries"})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	fmt.Print("\n" + testResultLines(reply.Results, false) + "\n")
 }
 
 func (s *menuSession) entryActions(e *emxv1.EntryInfo) {

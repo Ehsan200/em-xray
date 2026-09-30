@@ -105,14 +105,61 @@ func ProbeOutbounds(ctx context.Context, items []ProbeItem, opts ProbeOptions) [
 	if batch <= 0 {
 		batch = defaultProbeBatch
 	}
-	for start := 0; start < len(idx); start += batch {
-		end := min(start+batch, len(idx))
-		probeBatch(ctx, items, idx[start:end], out, opts)
+	for _, b := range planProbeBatches(items, idx, batch) {
+		probeBatch(ctx, items, b, out, opts)
 		if ctx.Err() != nil {
 			break
 		}
 	}
 	return out
+}
+
+// planProbeBatches packs item indices into batches of at most size, never
+// putting two hysteria items for the same server:port in one batch: xray's
+// hysteria client shares one QUIC connection between outbounds to the same
+// endpoint regardless of auth, so a node with a wrong password would be
+// measured through its neighbour's session (and vice versa). Input order is
+// kept within each batch.
+func planProbeBatches(items []ProbeItem, idx []int, size int) [][]int {
+	var batches [][]int
+	var seen []map[string]bool // per batch: hysteria endpoints already in it
+	for _, i := range idx {
+		ep := hysteriaEndpoint(items[i].Outbound)
+		placed := false
+		for b := range batches {
+			if len(batches[b]) < size && (ep == "" || !seen[b][ep]) {
+				batches[b] = append(batches[b], i)
+				if ep != "" {
+					seen[b][ep] = true
+				}
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			batches = append(batches, []int{i})
+			seen = append(seen, map[string]bool{})
+			if ep != "" {
+				seen[len(seen)-1][ep] = true
+			}
+		}
+	}
+	return batches
+}
+
+// hysteriaEndpoint returns "address:port" for a hysteria outbound, "" otherwise.
+func hysteriaEndpoint(outbound string) string {
+	var ob struct {
+		Protocol string `json:"protocol"`
+		Settings struct {
+			Address string `json:"address"`
+			Port    any    `json:"port"`
+		} `json:"settings"`
+	}
+	if json.Unmarshal([]byte(outbound), &ob) != nil || !strings.EqualFold(ob.Protocol, "hysteria") {
+		return ""
+	}
+	return fmt.Sprintf("%s:%v", strings.ToLower(ob.Settings.Address), ob.Settings.Port)
 }
 
 // probeBatch runs one throwaway xray for the given item indices and fills their

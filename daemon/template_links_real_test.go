@@ -130,14 +130,10 @@ func TestTemplateLinksCarryTraffic(t *testing.T) {
 			t.Logf("server error log:\n%s", b)
 		}()
 	}
-	// One probe xray per link: xray's hysteria client shares a QUIC connection
-	// between outbounds to the same server:port regardless of auth, so a batch
-	// would let one link's credentials vouch for another's.
 	got := map[string]xray.ProbeResult{}
-	for _, it := range items {
-		r := xray.ProbeOutbounds(ctx, []xray.ProbeItem{it}, xray.ProbeOptions{
-			Bin: bin, AssetDir: dir, WorkDir: dir, URL: target, Timeout: 5 * time.Second,
-		})[0]
+	for _, r := range xray.ProbeOutbounds(ctx, items, xray.ProbeOptions{
+		Bin: bin, AssetDir: dir, WorkDir: dir, URL: target, Timeout: 5 * time.Second,
+	}) {
 		got[r.Name] = r
 	}
 	for _, c := range cases {
