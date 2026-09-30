@@ -33,7 +33,7 @@ func TestMuxSharesTunnels(t *testing.T) {
 	srvPort := freePort(t)
 	srvCfg := `{"inbounds":[{"tag":"in","listen":"127.0.0.1","port":` + strconv.Itoa(srvPort) + `,"protocol":"vmess",` +
 		`"settings":{"clients":[{"id":"` + uuid + `"}]},"streamSettings":{"network":"ws","wsSettings":{"path":"/w"}}}],` +
-		`"outbounds":[{"protocol":"freedom","settings":{"finalRules":[{"action":"allow","ip":["127.0.0.0/8"]}]}}]}`
+		`"outbounds":[{"protocol":"freedom"}]}`
 	cfgPath := filepath.Join(dir, "server.json")
 	if err := os.WriteFile(cfgPath, []byte(srvCfg), 0o644); err != nil {
 		t.Fatal(err)

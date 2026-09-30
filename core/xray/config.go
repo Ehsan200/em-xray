@@ -22,14 +22,6 @@ type GenOptions struct {
 	DialerSource bool
 }
 
-// DirectAllowLoopback lets the `direct` outbound reach loopback targets for
-// traffic arriving on a proxy inbound. Since v26.9.x xray's freedom blocks
-// private destinations for vless/vmess/trojan/hysteria/shadowsocks inbounds by
-// default, so a client can't reach this box's own localhost/LAN — that stays
-// the production behavior. Real-binary tests flip it (their target is a local
-// HTTP server), the same way they move ApiPort.
-var DirectAllowLoopback = false
-
 // Generate builds the full xray config.json from entries (outbounds), inbounds
 // (listeners routed to a target), and resolved dialer slots (a master's node
 // pool). Output is deterministic (all sorted by name, JSON keys sorted by
@@ -66,15 +58,9 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	// silently defeating the tunnel. `block` leads so a routing miss fails
 	// CLOSED. `direct` stays reachable, but only by explicit tag, i.e. only for
 	// inbounds whose Target really is "direct".
-	direct := map[string]any{"tag": "direct", "protocol": "freedom"}
-	if DirectAllowLoopback {
-		direct["settings"] = map[string]any{"finalRules": []any{
-			map[string]any{"action": "allow", "ip": []string{"127.0.0.0/8", "::1/128"}},
-		}}
-	}
 	outbounds := []any{
 		map[string]any{"tag": "block", "protocol": "blackhole"},
-		direct,
+		map[string]any{"tag": "direct", "protocol": "freedom"},
 	}
 	haveOut := map[string]bool{"direct": true, "block": true}
 	for _, e := range ents {
