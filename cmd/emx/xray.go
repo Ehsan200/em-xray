@@ -186,10 +186,11 @@ func probeIntervalCmd() *cobra.Command {
 		Use:   "probe-interval [seconds]",
 		Short: "show or change how often the observatory pings pool members",
 		Long: "The burst observatory health-pings every pool member on this cadence\n" +
-			"(default 10s, rolling window of 3, 5s timeout) and each pool's leastLoad\n" +
-			"balancer spreads traffic over the best two. A failing node is dropped on\n" +
-			"its next ping, so a shorter interval reacts faster; a longer one cuts\n" +
-			"probe traffic. Changing it restarts xray.",
+			"(default 10s, rounds of 2 pings, 5s timeout). Each pool spreads traffic\n" +
+			"over the daemon's best two nodes, with the third as a hot spare; a node\n" +
+			"that fails a whole round is skipped until it answers again, so a shorter\n" +
+			"interval reacts faster (within 2×interval) and a longer one cuts probe\n" +
+			"traffic. Changing it restarts xray.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := &emxv1.ProbeIntervalRequest{}

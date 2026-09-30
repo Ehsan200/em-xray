@@ -8,29 +8,33 @@ import (
 	"strings"
 )
 
-// Burst-observatory probe defaults. The burst observatory health-pings each
-// pool member every interval and keeps a rolling window of `sampling` results;
-// leastLoad demotes a node on a failed ping instead of waiting out the classic
-// observatory's averaged 60s probe, so a dying node is switched away from
-// within one or two pings.
+// Burst-observatory probe defaults. xray pings each pool member `sampling`
+// times per round of interval×sampling (at random moments inside the round)
+// and only records the results when the round ends; a member counts as alive
+// while any ping of that last round succeeded. So a member that dies is seen
+// dead at the end of the round it died in — up to interval×sampling plus the
+// ping timeout later — and the balancer skips it from then on.
 //
-// 10s keeps the cost low (each ping is a full outbound dial through the node,
-// and probe fan-out already scales with unique pools, not masters). Three
-// samples with a 5s timeout ride out one slow or retransmitted ping on a lossy
-// uplink; a node that is really dead still fails every one.
+// The per-member ping rate is one per interval whatever the sampling, so two
+// samples, not three, shortens that detection by a third (20s instead of 30s
+// at the default 10s interval) at no extra probe cost. Two still ride out one
+// lost ping on a lossy uplink; a node that is really dead fails both. 10s
+// keeps the cost low: each ping is a full outbound dial through the node, and
+// probe fan-out already scales with unique pools, not masters.
 const (
 	DefaultProbeURL           = "http://www.gstatic.com/generate_204"
 	DefaultProbeInterval      = "10s"
-	DefaultProbeSampling      = 3
+	DefaultProbeSampling      = 2
 	DefaultPingTimeout        = "5s"
 	ObservatorySelectorPrefix = "slot"
 )
 
-// SlotBalancerExpected is how many best-ranked members a slot's leastLoad
-// balancer spreads connections over. Two, not one: with a single winner every
-// connection of every master on the pool rides one node, and that node dying
-// drops all of them at once. It costs nothing in exit identity — a master's
-// exit IP is its own server whichever node carries the tunnel.
+// SlotBalancerExpected is how many best-ranked members a slot's balancer
+// spreads connections over (the daemon's active pick, or leastLoad's expected
+// before the daemon has ranked the pool). Two, not one: with a single winner
+// every connection of every master on the pool rides one node, and that node
+// dying drops all of them at once. It costs nothing in exit identity — a
+// master's exit IP is its own server whichever node carries the tunnel.
 const SlotBalancerExpected = 2
 
 // Dialer ref kinds.
@@ -170,7 +174,10 @@ type Slot struct {
 	Key     string // DialerGroupKey of the refs the slot serves
 	Index   int
 	Members []SlotMember
-	Picked  []string // member keys the balancer uses, best (fallback) first; empty = all
+	// Picked is the daemon's ranking: the first SlotBalancerExpected keys are
+	// the balancer's selector, the next is its fallback (a hot spare). Empty =
+	// not ranked yet, leastLoad over every member.
+	Picked []string
 }
 
 // SlotMasters returns every master wired to the slot, owner first.

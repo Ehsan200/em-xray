@@ -21,8 +21,9 @@ const (
 )
 
 // Burst-observatory ping cadence bounds. The interval is a reaction-time /
-// probe-traffic trade: leastLoad drops a failing node on its next ping, and
-// after an xray restart no member is ranked until the first ping lands.
+// probe-traffic trade: the balancer skips a node that failed its whole last
+// ping round (interval × DefaultProbeSampling), and after an xray restart no
+// member is ranked until the first round lands.
 const (
 	DefaultProbeIntervalSec = 10
 	MinProbeIntervalSec     = 5

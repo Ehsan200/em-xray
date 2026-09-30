@@ -29,7 +29,7 @@ type GenOptions struct {
 //
 // When any slot exists, the master-dialer machinery is emitted: a gRPC api +
 // dokodemo inbound, per-pool slot (socks inbound + dialer outbound per master +
-// member outbounds + leastLoad balancer + routing rule), one shared burst
+// member outbounds + balancer + routing rule), one shared burst
 // observatory, and
 // the master's own outbound gets streamSettings.sockopt.dialerProxy so its
 // server connection tunnels through the fastest node.
@@ -206,37 +206,55 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 				loaded[m.Key] = true
 				outbounds = append(outbounds, mo)
 			}
-			// Daemon-picked members narrow the selector (full tags); best is fallback.
+			// Before the daemon has ranked the pool (first pings after a
+			// start) leastLoad over the prefix picks by itself: it only
+			// counts members the observatory has seen answer, and spreads
+			// over the best SlotBalancerExpected of them. No maxRTT cap on
+			// purpose: if every node is slow we still want the least-bad.
+			//
+			// fallbackTag covers the moments nothing qualifies: right after
+			// xray starts (no ping has completed yet) and when every
+			// member's recent pings failed. It is the pool's FIRST member:
+			// with `block` there, every master connection failed until the
+			// first ping landed after each start. A member still egresses
+			// through a node, never this box — CheckMemberOutbound
+			// guarantees it tunnels — so this is not a leak. Only an empty
+			// pool falls back to `block`, keeping the master fail-closed.
 			selector := []any{SlotOutPrefix(idx)}
-			var picked []any
+			strategy := map[string]any{
+				"type":     "leastLoad",
+				"settings": map[string]any{"expected": SlotBalancerExpected},
+			}
+			// Once the daemon has ranked the pool, its pick replaces
+			// leastLoad's: leastLoad orders by RTT jitter, not latency, so it
+			// would reshuffle the daemon's best by noise. The active members
+			// become the selector under `random`, which (with a fallbackTag
+			// set) still skips members the observatory sees dead, so a dying
+			// node drops out on the next ping round, not the next daemon
+			// poll. The spare — ranked next, probed, but carrying nothing —
+			// is the fallback, so losing both active members lands on a
+			// member that was answering rather than on one that just died.
+			var picked []string
 			for _, k := range s.Picked {
 				if loaded[k] {
 					picked = append(picked, SlotMemberTag(idx, k))
 				}
 			}
 			if len(picked) > 0 {
-				selector = picked
-				fallback = picked[0].(string)
+				active := min(SlotBalancerExpected, len(picked))
+				selector = nil
+				for _, t := range picked[:active] {
+					selector = append(selector, t)
+				}
+				fallback = picked[0]
+				if len(picked) > active {
+					fallback = picked[active]
+				}
+				strategy = map[string]any{"type": "random"}
 			}
-			// leastLoad over the prefix reads the burst observatory's rolling
-			// ping window and spreads connections over the best
-			// SlotBalancerExpected healthy members. No maxRTT cap on purpose:
-			// if every node is slow we still want the least-bad ones.
-			//
-			// fallbackTag covers the moments leastLoad has nothing ranked:
-			// right after xray starts (no ping has completed yet) and when
-			// every member's recent pings failed. It is the pool's FIRST
-			// member: with `block` there, every master connection failed
-			// until the first ping landed after each start. A member still
-			// egresses through a node, never this box — CheckMemberOutbound
-			// guarantees it tunnels — so this is not a leak. Only an empty
-			// pool falls back to `block`, keeping the master fail-closed.
 			balancers = append(balancers, map[string]any{
 				"tag": SlotBalTag(idx), "selector": selector,
-				"strategy": map[string]any{
-					"type":     "leastLoad",
-					"settings": map[string]any{"expected": SlotBalancerExpected},
-				},
+				"strategy":    strategy,
 				"fallbackTag": fallback,
 			})
 			// route slot inbound → balancer
@@ -246,7 +264,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			})
 		}
 
-		// One shared burst observatory feeds every slot's leastLoad; its
+		// One shared burst observatory feeds every slot's balancer; its
 		// prefix selector matches every slot member outbound. Emitted even
 		// with no slots: it idles with nothing to match, and having it from
 		// the start means the first master a user adds applies live instead

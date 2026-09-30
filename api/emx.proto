@@ -121,7 +121,7 @@ message WinnerInfo {
   string node = 2;    // winning member name ("" if none selected yet)
   string tag = 3;     // slotN-out-<key>
   int32 members = 4;  // resolved pool size; 0 => nothing to pick, master fails closed
-  repeated string nodes = 5; // every member the leastLoad balancer spreads over, best first
+  repeated string nodes = 5; // every member the balancer currently spreads over
   int32 alive = 6;           // members whose latest pings succeed; -1 = unknown
 }
 message WinnersReply { repeated WinnerInfo winners = 1; }

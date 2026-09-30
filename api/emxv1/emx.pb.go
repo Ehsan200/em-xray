@@ -460,7 +460,7 @@ type WinnerInfo struct {
 	Node          string                 `protobuf:"bytes,2,opt,name=node,proto3" json:"node,omitempty"`        // winning member name ("" if none selected yet)
 	Tag           string                 `protobuf:"bytes,3,opt,name=tag,proto3" json:"tag,omitempty"`          // slotN-out-<key>
 	Members       int32                  `protobuf:"varint,4,opt,name=members,proto3" json:"members,omitempty"` // resolved pool size; 0 => nothing to pick, master fails closed
-	Nodes         []string               `protobuf:"bytes,5,rep,name=nodes,proto3" json:"nodes,omitempty"`      // every member the leastLoad balancer spreads over, best first
+	Nodes         []string               `protobuf:"bytes,5,rep,name=nodes,proto3" json:"nodes,omitempty"`      // every member the balancer currently spreads over
 	Alive         int32                  `protobuf:"varint,6,opt,name=alive,proto3" json:"alive,omitempty"`     // members whose latest pings succeed; -1 = unknown
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

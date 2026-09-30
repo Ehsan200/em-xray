@@ -9,11 +9,11 @@ import (
 	"github.com/ehsan200/em-xray/core/xray"
 )
 
-// Winner is the balancer-selected (fastest) member for one master.
+// Winner is what one master's balancer currently routes to.
 type Winner struct {
 	Master  string
 	Node    string   // human name of the winning member ("" if none yet)
-	Nodes   []string // every member the balancer currently spreads over, best first
+	Nodes   []string // every member the balancer currently spreads over
 	Tag     string   // slotN-out-<key> ("" if none)
 	Members int      // resolved pool size; 0 means the balancer has nothing to pick
 	Alive   int      // members whose latest pings succeed; -1 = unknown (no metrics yet)
@@ -51,17 +51,37 @@ func (s *Supervisor) Winners() ([]Winner, error) {
 		for _, m := range sl.Members {
 			names[xray.SlotMemberTag(sl.Index, m.Key)] = s.memberName(m.Key)
 		}
-		var wtag, node string
-		var nodes []string
+		// A ranked pool's balancer is `random` over the daemon's active pair,
+		// and xray lists that whole selector — dead members too, which it
+		// skips when routing. Show what it routes to: the live ones, or the
+		// spare (its fallback) once none is live.
+		ranked := len(sl.Picked) > 0
+		dead := func(tag string) bool {
+			st, ok := health[tag]
+			return herr == nil && ok && st.dead()
+		}
+		var tags []string
 		for _, tag := range selects[xray.SlotBalTag(sl.Index)] {
-			name, ok := names[tag]
-			if !ok {
+			if _, ok := names[tag]; !ok {
 				continue // stale pick for a member already removed
 			}
-			if wtag == "" {
-				wtag, node = tag, name
+			if ranked && dead(tag) {
+				continue
 			}
-			nodes = append(nodes, name)
+			tags = append(tags, tag)
+		}
+		if ranked && len(tags) == 0 && len(sl.Picked) > xray.SlotBalancerExpected {
+			if spare := xray.SlotMemberTag(sl.Index, sl.Picked[xray.SlotBalancerExpected]); names[spare] != "" {
+				tags = []string{spare}
+			}
+		}
+		var wtag, node string
+		var nodes []string
+		for _, tag := range tags {
+			if wtag == "" {
+				wtag, node = tag, names[tag]
+			}
+			nodes = append(nodes, names[tag])
 		}
 		alive := -1
 		if herr == nil {

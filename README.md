@@ -11,7 +11,7 @@ Two jobs:
 
 ```
 your client ──vless/reality──▶ emx inbound ──▶ master ──dialerProxy──▶ fastest node ──▶ internet
-                                              (leastLoad over best 2 + burst observatory)
+                                              (best 2 + hot spare, burst observatory)
 ```
 
 The xray binary and geo data are embedded. Interactive menus: run any command group bare (`emx`,
@@ -307,11 +307,20 @@ master outbound
   sockopt.dialerProxy → "dialer-<master>"      (stable socks outbound)
     → 127.0.0.1:<slotPort>                     (slot socks inbound)
       → routing: slotN-in → balancerTag slotN-bal
-        → leastLoad spreads over the best 2 slotN-out-<key> members → the node outbound
+        → spreads over the best 2 slotN-out-<key> members → the node outbound
 ```
 
 Members share the `slotN-out-` tag **prefix**, so the balancer and the shared observatory adopt
-live-added members with no reload. A pool keeps its slot index across changes, so adding a master
+live-added members with no reload.
+
+**Which nodes carry a master.** xray's own `leastLoad` ranks nodes by RTT *jitter*, not latency (a
+steady 900ms node beats a 90ms one that wobbles), so it only picks until the daemon has data. The
+daemon scores every member from the observatory (latency and success rate over time, stickiness
+against flapping) and hands xray its pick: the best 2 become the balancer's selector under
+`random`, which still skips any member whose last ping round failed, and the 3rd is a hot spare set
+as `fallbackTag` — probed, carrying nothing until both active nodes are down. So a dying node is
+dropped by xray within one ping round, without waiting for the daemon, and losing both active
+nodes lands on one that was answering. A pool keeps its slot index across changes, so adding a master
 never renumbers another pool's slot.
 
 **xray is restarted only when unavoidable.** Every change — adding/editing/removing an entry,
@@ -348,9 +357,10 @@ An inbound routed through a master must never egress from this box's IP. The rul
 - A master itself can't be hysteria: xray's hysteria client ignores `dialerProxy` and would dial its
   server straight off this box. Adding, editing or importing one is refused; one already stored is
   generated as a blackhole. Hysteria works fine as a pool member or as a plain `xray:` target.
-- Each balancer falls back to the pool's **first member** while `leastLoad` has nothing ranked (right
-  after a start, or when every recent ping failed) — so a restart doesn't black out masters until
-  the first ping — and to `block` only when the pool is empty.
+- Each balancer falls back to the daemon's **spare** node once the pool is ranked, and to the pool's
+  **first member** before that (right after a start, when nothing has answered a ping yet) — so a
+  restart doesn't black out masters until the first ping — and to `block` only when the pool is
+  empty.
 - An enabled master always gets a slot, even with zero members, so the `dialerProxy` hop never
   disappears.
 - A live apply adds before it removes, so a full pool rotation is never empty mid-flight, and takes
@@ -359,9 +369,9 @@ An inbound routed through a master must never egress from this box's IP. The rul
 
 `emx status` and `emx winner` report how many pool members answer pings and which ones the master
 is spread over; `emx in ls` marks the inbounds
-that legitimately use this server's IP. The burst observatory pings every member every 10s (window
-of 3, 5s timeout) and `leastLoad` drops a failing node on its next ping; `emx probe-interval`
-changes the cadence (5–3600s).
+that legitimately use this server's IP. The burst observatory pings every member every 10s (rounds
+of 2 pings, 5s timeout) and a node that fails a whole round is skipped until it answers again —
+within ~20s of dying; `emx probe-interval` changes the cadence (5–3600s).
 
 ### Health, testing, accounting
 

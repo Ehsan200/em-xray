@@ -20,7 +20,7 @@ import (
 // A subscription pool routinely carries nodes that are simply gone. The burst
 // observatory keeps pinging each of them every interval forever — a full
 // outbound dial through the node and a warning line in xray's error log, per
-// dead node per interval — and leastLoad already routes around them, so they
+// dead node per interval — and the balancer already routes around them, so they
 // cost probes and log volume and buy nothing.
 //
 // A node that has failed every ping for nodeDeadBeforePark is parked: left out

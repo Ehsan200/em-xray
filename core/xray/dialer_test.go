@@ -2,6 +2,7 @@ package xray
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -273,6 +274,47 @@ func TestGenerateFallbackIsFirstTunnelMember(t *testing.T) {
 	m = om(t, mustGen(t, entries, slots))
 	if got := dig(t, m, "routing", "balancers", 0, "fallbackTag"); got != "block" {
 		t.Errorf("empty pool fallbackTag = %v, want block", got)
+	}
+}
+
+// Once the daemon has ranked the pool, the balancer follows its pick: the
+// active members under `random` (xray still skips dead ones), the spare as
+// fallback. A pick naming a member that isn't loaded is ignored.
+func TestGeneratePickedBalancer(t *testing.T) {
+	entries := []XrayEntry{{Name: "M", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`}}
+	sock := `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.4","port":1}]}}`
+	members := []SlotMember{{Key: "a", Outbound: sock}, {Key: "b", Outbound: sock}, {Key: "c", Outbound: sock}, {Key: "d", Outbound: sock}}
+	bal := func(picked ...string) any {
+		return dig(t, om(t, mustGen(t, entries, []Slot{{Master: "M", Members: members, Picked: picked}})), "routing", "balancers", 0)
+	}
+
+	b := bal("b", "d", "a")
+	if got := dig(t, b, "strategy", "type"); got != "random" {
+		t.Errorf("picked strategy = %v, want random", got)
+	}
+	if got := dig(t, b, "selector"); !reflect.DeepEqual(got, []any{"slot0-out-b", "slot0-out-d"}) {
+		t.Errorf("picked selector = %v, want the active pair", got)
+	}
+	if got := dig(t, b, "fallbackTag"); got != "slot0-out-a" {
+		t.Errorf("picked fallbackTag = %v, want spare slot0-out-a", got)
+	}
+
+	// No spare: fall back to the first active member.
+	b = bal("gone", "c")
+	if got := dig(t, b, "selector"); !reflect.DeepEqual(got, []any{"slot0-out-c"}) {
+		t.Errorf("selector with an unloaded pick = %v", got)
+	}
+	if got := dig(t, b, "fallbackTag"); got != "slot0-out-c" {
+		t.Errorf("fallbackTag without spare = %v, want slot0-out-c", got)
+	}
+
+	// Nothing loaded picked: leastLoad over the prefix, as before ranking.
+	b = bal("gone")
+	if got := dig(t, b, "strategy", "type"); got != "leastLoad" {
+		t.Errorf("unranked strategy = %v, want leastLoad", got)
+	}
+	if got := dig(t, b, "fallbackTag"); got != "slot0-out-a" {
+		t.Errorf("unranked fallbackTag = %v, want first member", got)
 	}
 }
 
