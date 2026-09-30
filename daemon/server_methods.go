@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
@@ -43,6 +44,11 @@ func (s *Server) EntryAdd(ctx context.Context, req *emxv1.EntryAddRequest) (*emx
 	}
 	if err := s.validateDialer(req.Dialer, req.Name); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(req.Dialer) != "" {
+		if err := xray.CheckMasterOutbound(outbound); err != nil {
+			return nil, err
+		}
 	}
 	e := &xray.XrayEntry{Name: req.Name, Outbound: outbound, Enabled: true, Dialer: req.Dialer, Mux: req.Mux}
 	if err := s.store.CreateEntry(e); err != nil {
@@ -110,6 +116,11 @@ func (s *Server) EntrySetConfig(ctx context.Context, req *emxv1.SetConfigRequest
 	e, err := s.store.GetEntry(uint(req.Id))
 	if err != nil {
 		return nil, err
+	}
+	if e.IsMaster() {
+		if err := xray.CheckMasterOutbound(req.Json); err != nil {
+			return nil, fmt.Errorf("entry %q has a dialer: %w", e.Name, err)
+		}
 	}
 	e.Outbound = req.Json
 	if err := s.store.UpdateEntry(e); err != nil {

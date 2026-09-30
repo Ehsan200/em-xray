@@ -314,6 +314,9 @@ An inbound routed through a master must never egress from this box's IP. The rul
 - `block` is `outbounds[0]`, so any routing miss hits a blackhole (xray's default handler).
 - A pool member must be a proxy protocol (vless, vmess, trojan, shadowsocks, socks, http, hysteria,
   wireguard). A `freedom` entry is refused as a dialer ref and dropped from a pool if edited later.
+- A master itself can't be hysteria: xray's hysteria client ignores `dialerProxy` and would dial its
+  server straight off this box. Adding, editing or importing one is refused; one already stored is
+  generated as a blackhole. Hysteria works fine as a pool member or as a plain `xray:` target.
 - Each balancer falls back to the pool's **first member** while `leastLoad` has nothing ranked (right
   after a start, or when every recent ping failed) — so a restart doesn't black out masters until
   the first ping — and to `block` only when the pool is empty.

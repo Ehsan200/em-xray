@@ -59,6 +59,13 @@ func (s *Server) ImportConfig(ctx context.Context, req *emxv1.ImportRequest) (*e
 	if b.Version > backupVersion {
 		return nil, fmt.Errorf("backup version %d newer than supported %d", b.Version, backupVersion)
 	}
+	for _, e := range b.Entries {
+		if e.IsMaster() {
+			if err := xray.CheckMasterOutbound(e.Outbound); err != nil {
+				return nil, fmt.Errorf("entry %q has a dialer: %w", e.Name, err)
+			}
+		}
+	}
 	if req.Replace {
 		if err := s.store.DeleteAllConfig(); err != nil {
 			return nil, fmt.Errorf("wipe existing: %w", err)

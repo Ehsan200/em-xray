@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +30,20 @@ func startTLS13(t *testing.T) string {
 	return srv.Listener.Addr().String()
 }
 
+// socksOutbound is the client side of a socks inbound. ParseLink has no socks://
+// support (clients import those directly), so build what xray would use.
+func socksOutbound(in xray.Inbound) string {
+	srv := map[string]any{"address": "127.0.0.1", "port": in.Port}
+	if in.SocksUser != "" {
+		srv["users"] = []any{map[string]any{"user": in.SocksUser, "pass": in.Password}}
+	}
+	b, _ := json.Marshal(map[string]any{
+		"protocol": "socks",
+		"settings": map[string]any{"servers": []any{srv}},
+	})
+	return string(b)
+}
+
 func TestTemplateLinksCarryTraffic(t *testing.T) {
 	needRealXray(t)
 	useFreeXrayPorts(t)
@@ -37,29 +52,47 @@ func TestTemplateLinksCarryTraffic(t *testing.T) {
 	if os.Getenv("EMX_TEST_LOG") != "" {
 		_ = store.SetSetting(xray.SettingLogLevel, "debug")
 	}
+	// Self-signed certs come from `xray tls cert`, as in the running daemon.
+	oldCert := xray.TLSCertFunc
+	installTLSCertGen(sup.paths)
+	t.Cleanup(func() { xray.TLSCertFunc = oldCert })
 
 	// REALITY borrows a real TLS 1.3 server's handshake (its dest) on every
 	// connection; point it at a local one so the test needs no internet.
 	realityDest := startTLS13(t)
 
-	type tc struct{ name, link string }
+	// Each template is checked twice where it supports users: its primary link
+	// and the link of an extra user added afterwards (`emx in user add`).
+	type tc struct{ name, link, outbound string }
 	var cases []tc
 	for _, tmpl := range xray.TemplateList() {
 		in, err := xray.NewInboundFromTemplate("t-"+tmpl.Name, tmpl.Name, "direct")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: create: %v", tmpl.Name, err)
 		}
-		if xray.IsUnixInbound(*in) || in.Protocol == "socks" {
-			continue // caddy-fronted / socks: not a dialable server link here
+		if xray.IsUnixInbound(*in) {
+			continue // caddy-fronted: public side is Caddy, not dialable here
 		}
 		in.Listen, in.Port = "127.0.0.1", freePort(t)
 		if in.Security == "reality" {
 			in.RealityDest = realityDest
 		}
 		if err := store.CreateInbound(in); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: store: %v", tmpl.Name, err)
 		}
-		cases = append(cases, tc{tmpl.Name, xray.ShareLink(*in, "127.0.0.1")})
+		if in.Protocol == "socks" {
+			cases = append(cases, tc{name: tmpl.Name, outbound: socksOutbound(*in)})
+			continue
+		}
+		cases = append(cases, tc{name: tmpl.Name, link: xray.ShareLink(*in, "127.0.0.1")})
+		u, err := xray.NewInboundUser(in, "extra", 0)
+		if err != nil {
+			t.Fatalf("%s: new user: %v", tmpl.Name, err)
+		}
+		if err := store.CreateInboundUser(u); err != nil {
+			t.Fatalf("%s: store user: %v", tmpl.Name, err)
+		}
+		cases = append(cases, tc{name: tmpl.Name + "/user", link: xray.ShareLinkForUser(*in, "127.0.0.1", *u)})
 	}
 	if err := sup.Reconcile(); err != nil {
 		t.Fatal(err)
@@ -78,13 +111,16 @@ func TestTemplateLinksCarryTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	var items []xray.ProbeItem
-	for _, c := range cases {
-		pl, err := xray.ParseLink(c.link)
-		if err != nil {
-			t.Errorf("%s: parse own share link: %v\n%s", c.name, err, c.link)
-			continue
+	for i, c := range cases {
+		if c.outbound == "" {
+			pl, err := xray.ParseLink(c.link)
+			if err != nil {
+				t.Errorf("%s: parse own share link: %v\n%s", c.name, err, c.link)
+				continue
+			}
+			cases[i].outbound = string(pl.Outbound)
 		}
-		items = append(items, xray.ProbeItem{Name: c.name, Outbound: string(pl.Outbound)})
+		items = append(items, xray.ProbeItem{Name: c.name, Outbound: cases[i].outbound})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -94,17 +130,26 @@ func TestTemplateLinksCarryTraffic(t *testing.T) {
 			t.Logf("server error log:\n%s", b)
 		}()
 	}
-	for _, r := range xray.ProbeOutbounds(ctx, items, xray.ProbeOptions{
-		Bin: bin, AssetDir: dir, WorkDir: dir, URL: target, Timeout: 5 * time.Second,
-	}) {
-		if r.Err != nil {
-			link := ""
-			for _, c := range cases {
-				if c.name == r.Name {
-					link = c.link
-				}
+	// One probe xray per link: xray's hysteria client shares a QUIC connection
+	// between outbounds to the same server:port regardless of auth, so a batch
+	// would let one link's credentials vouch for another's.
+	got := map[string]xray.ProbeResult{}
+	for _, it := range items {
+		r := xray.ProbeOutbounds(ctx, []xray.ProbeItem{it}, xray.ProbeOptions{
+			Bin: bin, AssetDir: dir, WorkDir: dir, URL: target, Timeout: 5 * time.Second,
+		})[0]
+		got[r.Name] = r
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r, ok := got[c.name]
+			switch {
+			case !ok:
+				t.Fatal("never probed")
+			case r.Err != nil:
+				t.Fatalf("does not carry traffic: %v\n  %s", r.Err, strings.SplitN(c.link, "#", 2)[0])
 			}
-			t.Errorf("%s: link does not carry traffic: %v\n  %s", r.Name, r.Err, strings.SplitN(link, "#", 2)[0])
-		}
+			t.Logf("ok %dms", r.LatencyMs)
+		})
 	}
 }

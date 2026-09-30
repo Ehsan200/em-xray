@@ -246,6 +246,23 @@ var tunnelProtocols = map[string]bool{
 	"socks": true, "http": true, "hysteria": true, "wireguard": true,
 }
 
+// CheckMasterOutbound reports why an outbound can't be a master (an entry with
+// a dialer), or nil. xray's hysteria client dials its QUIC socket itself and
+// ignores sockopt.dialerProxy, so a hysteria master would skip its pool and
+// reach its server straight off this box — silently, when that path exists.
+func CheckMasterOutbound(outbound string) error {
+	var ob struct {
+		Protocol string `json:"protocol"`
+	}
+	if err := json.Unmarshal([]byte(outbound), &ob); err != nil {
+		return fmt.Errorf("bad outbound json: %w", err)
+	}
+	if strings.EqualFold(ob.Protocol, "hysteria") {
+		return fmt.Errorf("hysteria ignores dialer chains in xray (it would dial its server directly); use a vless/vmess/trojan master behind the pool instead")
+	}
+	return nil
+}
+
 // CheckMemberOutbound reports why an outbound can't be a pool member, or nil.
 func CheckMemberOutbound(outbound string) error {
 	var ob struct {

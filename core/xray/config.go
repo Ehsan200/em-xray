@@ -78,8 +78,12 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 		// A master tunnels its own server connection through its pool via
 		// dialerProxy. A master left without a slot (pool limit reached) is
 		// pointed at the blackhole instead: with no dialerProxy it would dial
-		// its server straight off this box.
-		if _, ok := slotIdx[e.Name]; ok {
+		// its server straight off this box. A master that can't honor
+		// dialerProxy at all (hysteria; refused on write, but may predate
+		// that or come from a backup) becomes a blackhole itself.
+		if e.IsMaster() && CheckMasterOutbound(e.Outbound) != nil {
+			ob = map[string]any{"tag": tag, "protocol": "blackhole"}
+		} else if _, ok := slotIdx[e.Name]; ok {
 			setDialerProxy(ob, DialerTag(e.Name))
 		} else if e.IsMaster() {
 			setDialerProxy(ob, "block")

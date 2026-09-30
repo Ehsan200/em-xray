@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
 	"github.com/ehsan200/em-xray/core/xray"
 	"github.com/ehsan200/em-xray/internal/paths"
 	"github.com/ehsan200/em-xray/internal/xraybin"
@@ -278,4 +280,75 @@ func TestFreedomMemberRejected(t *testing.T) {
 	if err := srv.validateDialer("xray:free", "M2"); err == nil {
 		t.Fatal("dialer naming a freedom entry was accepted")
 	}
+}
+
+// xray's hysteria client ignores dialerProxy, so a hysteria master would skip
+// its pool and dial its server straight off this box. Every write path refuses
+// one, and a stored one (older build, hand-edited db) is generated as a
+// blackhole: it fails closed instead of leaking.
+func TestHysteriaMasterRefused(t *testing.T) {
+	store, sup := newTestSupervisor(t)
+	srv := &Server{store: store, sup: sup}
+	hyIn, err := xray.NewInboundFromTemplate("hy", "hysteria2", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hyIn.Port = 443
+	link := xray.ShareLink(*hyIn, "203.0.113.1")
+	pl, err := xray.ParseLink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := `{"protocol":"socks","settings":{"servers":[{"address":"203.0.113.2","port":1080}]}}`
+	if err := store.CreateEntry(&xray.XrayEntry{Name: "relay", Enabled: true, Outbound: relay}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	if _, err := srv.EntryAdd(ctx, &emxv1.EntryAddRequest{Name: "hy", Link: link, Dialer: "xray:relay"}); err == nil || !strings.Contains(err.Error(), "hysteria") {
+		t.Fatalf("hysteria master added: %v", err)
+	}
+
+	m := &xray.XrayEntry{Name: "M", Enabled: true, Dialer: "xray:relay", Outbound: relay}
+	if err := store.CreateEntry(m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.EntrySetConfig(ctx, &emxv1.SetConfigRequest{Id: uint32(m.ID), Json: string(pl.Outbound)}); err == nil {
+		t.Fatal("master edited into hysteria")
+	}
+	if got, _ := store.GetEntry(m.ID); got.Outbound != relay {
+		t.Fatalf("refused edit still stored: %s", got.Outbound)
+	}
+
+	backup, _ := json.Marshal(configBackup{Version: backupVersion, Entries: []xray.XrayEntry{
+		{Name: "imported", Enabled: true, Dialer: "xray:relay", Outbound: string(pl.Outbound)},
+	}})
+	if _, err := srv.ImportConfig(ctx, &emxv1.ImportRequest{Json: string(backup)}); err == nil {
+		t.Fatal("backup with a hysteria master imported")
+	}
+	if _, err := store.GetEntryByName("imported"); err == nil {
+		t.Fatal("refused import still stored the entry")
+	}
+
+	// Stored anyway: generated as a blackhole, never as a live hysteria dial.
+	stored := xray.XrayEntry{Name: "legacy", Enabled: true, Dialer: "xray:relay", Outbound: string(pl.Outbound)}
+	cfg, err := xray.Generate([]xray.XrayEntry{stored}, nil, nil, xray.GenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(cfg, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range doc.Outbounds {
+		if o["tag"] == xray.OutboundTag("legacy") {
+			if o["protocol"] != "blackhole" {
+				t.Fatalf("stored hysteria master generated as %v", o["protocol"])
+			}
+			return
+		}
+	}
+	t.Fatal("legacy master outbound missing")
 }
