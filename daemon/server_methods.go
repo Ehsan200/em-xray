@@ -170,10 +170,14 @@ func (s *Server) validateDialer(dialer, selfName string) error {
 
 func entryInfo(e xray.XrayEntry) *emxv1.EntryInfo {
 	_, note := xray.MuxSupport(e.Outbound)
+	var ob struct {
+		Protocol string `json:"protocol"`
+	}
+	_ = json.Unmarshal([]byte(e.Outbound), &ob)
 	return &emxv1.EntryInfo{
 		Id: uint32(e.ID), Name: e.Name, Enabled: e.Enabled,
 		IsMaster: e.IsMaster(), Dialer: e.Dialer,
-		Mux: e.Mux, MuxNote: note,
+		Mux: e.Mux, MuxNote: note, Protocol: ob.Protocol,
 	}
 }
 

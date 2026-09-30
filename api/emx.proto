@@ -322,6 +322,7 @@ message EntryInfo {
   string dialer = 5;
   bool mux = 6;          // stored mux opt-in
   string mux_note = 7;   // why mux can't apply to this outbound ("" = it can)
+  string protocol = 8;   // outbound protocol (vless, wireguard, …)
 }
 message EntryReply { EntryInfo entry = 1; }
 message EntryListReply { repeated EntryInfo entries = 1; }

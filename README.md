@@ -91,6 +91,35 @@ sudo emx in user ls 1
 
 ---
 
+## Cloudflare WARP exit
+
+Make an inbound's traffic leave the internet from a Cloudflare IP:
+
+```
+your client ──▶ emx inbound ──▶ warp (WireGuard, from this box) ──▶ Cloudflare ──▶ internet
+```
+
+```bash
+sudo emx warp add                          # registers a free WARP device → entry "warp"
+sudo emx in add gate --to xray:warp        # listener whose exit IP is WARP's
+# or both at once:
+sudo emx warp add --inbound gate
+```
+
+In the menu: *Entries → + Add Cloudflare WARP*, which offers to create the inbound right after.
+
+emx registers the device with Cloudflare's client API itself (fresh key, no account needed) and
+stores it as an ordinary WireGuard entry, so `entry ls`, `entry test`, `rename`, `rm` and the
+`xray:NAME` / dialer refs all work on it. `--license KEY` applies a WARP+ key; `--dialer
+xraysub:POOL` reaches WARP through a pool instead of straight from this box. If Cloudflare's API is
+blocked from the box, register through a proxy exactly as with `emx update`
+(`--proxy <socks inbound | HOST:PORT | URL>`, `EMX_PROXY`, `HTTPS_PROXY`).
+
+The tunnel runs in xray's userspace stack (no kernel interface, no routes touched on the box) and
+dials WARP's endpoint by IP. Destination names are resolved on this box.
+
+---
+
 ## Caddy + Cloudflare + XHTTP
 
 `vless-caddy-xhttp` puts Caddy in front: Caddy owns Cloudflare's proxied ports and terminates TLS,
@@ -213,6 +242,8 @@ emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>] [--mux
 emx entry mux <id> on|off                   multiplex streams over a few tunnels (per entry)
 emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
 emx entry test [id]
+
+emx warp add [name] [--inbound NAME [-t TEMPLATE]] [--license KEY] [--dialer REFS] [--proxy P]
 
 emx in add [name] [-t TEMPLATE] [--to TARGET] [--host H] [--port N]
                   [--domain D] [--path P] [--email E] [--xhttp-mode MODE]

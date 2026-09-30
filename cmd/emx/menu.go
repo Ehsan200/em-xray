@@ -367,7 +367,11 @@ func (s *menuSession) userActions(in *emxv1.InboundInfo, u *emxv1.UserInfo) {
 	}
 }
 
-func (s *menuSession) inboundAdd() {
+func (s *menuSession) inboundAdd() { s.inboundAddTo("") }
+
+// inboundAddTo runs the add-inbound flow; a non-empty target skips the
+// egress picker (used right after creating the outbound it should feed).
+func (s *menuSession) inboundAddTo(target string) {
 	name, ok := runInput("Name", "")
 	if !ok || name == "" {
 		return
@@ -390,7 +394,9 @@ func (s *menuSession) inboundAdd() {
 	}
 	template := tmpls.Templates[ti].Name
 
-	target := s.pickTarget()
+	if target == "" {
+		target = s.pickTarget()
+	}
 	if target == "" {
 		return
 	}
@@ -494,7 +500,7 @@ func (s *menuSession) pickTarget() string {
 		}
 		for _, e := range entries.Entries {
 			if !e.IsMaster {
-				items = append(items, selectItem{label: "xray:" + e.Name, desc: "through this entry"})
+				items = append(items, selectItem{label: "xray:" + e.Name, desc: entryTargetDesc(e)})
 				targets = append(targets, "xray:"+e.Name)
 			}
 		}
@@ -803,7 +809,7 @@ func (s *menuSession) entriesMenu() {
 		}
 		items := make([]selectItem, 0, len(reply.Entries)+2)
 		for _, e := range reply.Entries {
-			kind := "entry"
+			kind := entryTargetDesc(e)
 			if e.IsMaster {
 				kind = "master → " + e.Dialer
 			}
@@ -813,13 +819,17 @@ func (s *menuSession) entriesMenu() {
 		if n > 0 {
 			items = append(items, selectItem{label: "⚡ Test all entries", desc: "real latency through every entry"})
 		}
-		items = append(items, selectItem{label: "+ Add entry / master"}, selectItem{label: "← Back"})
+		items = append(items, selectItem{label: "+ Add entry / master"},
+			selectItem{label: "+ Add Cloudflare WARP", desc: "free WARP account, registered for you — exit IP is Cloudflare's"},
+			selectItem{label: "← Back"})
 
 		i, ok := runSelect("Entries", items)
 		switch {
 		case !ok || i == len(items)-1:
 			return
 		case i == len(items)-2:
+			s.warpAdd()
+		case i == len(items)-3:
 			s.entryAdd()
 		case i == n:
 			s.testEntries()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
@@ -45,31 +46,7 @@ func updateCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			proxy = firstNonEmpty(proxy, os.Getenv(envProxy))
-			proxyUser = firstNonEmpty(proxyUser, os.Getenv(envUser))
-			proxyPass = firstNonEmpty(proxyPass, os.Getenv(envPass))
-			if proxy == "" && (proxyUser != "" || proxyPass != "") {
-				// Credentials alone are not an error — HTTPS_PROXY may be set —
-				// but silently authenticating to nothing would be.
-				if os.Getenv("HTTPS_PROXY") == "" && os.Getenv("https_proxy") == "" &&
-					os.Getenv("HTTP_PROXY") == "" && os.Getenv("http_proxy") == "" {
-					return fmt.Errorf("--proxy-user/--proxy-pass need a proxy: pass --proxy HOST:PORT or set %s", envProxy)
-				}
-			}
-			// A --proxy that isn't a HOST:PORT or URL names one of your own
-			// inbounds; look up its port and credentials instead of making the
-			// user retype them.
-			if proxy != "" && !looksLikeAddress(proxy) {
-				addr, u, p, err := resolveInboundProxy(cmd, proxy)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(out, "proxying through inbound %q (%s)\n", proxy, addr)
-				proxy = addr
-				proxyUser = firstNonEmpty(proxyUser, u)
-				proxyPass = firstNonEmpty(proxyPass, p)
-			}
-			hc, err := selfupdate.NewClient(proxy, proxyUser, proxyPass)
+			hc, err := proxyHTTPClient(cmd, proxy, proxyUser, proxyPass)
 			if err != nil {
 				return err
 			}
@@ -131,6 +108,39 @@ func updateCmd() *cobra.Command {
 	c.Flags().StringVar(&proxyPass, "proxy-pass", "",
 		"`password` for --proxy-user; prefer "+envPass+" in the environment, since a flag is visible in `ps`")
 	return c
+}
+
+// proxyHTTPClient builds the HTTP client for a fetch this box may not be able
+// to make directly (a release download, a WARP registration). proxy is an
+// inbound name, a HOST:PORT or a URL; blank falls back to EMX_PROXY and then
+// HTTPS_PROXY/HTTP_PROXY.
+func proxyHTTPClient(cmd *cobra.Command, proxy, proxyUser, proxyPass string) (*http.Client, error) {
+	out := cmd.OutOrStdout()
+	proxy = firstNonEmpty(proxy, os.Getenv(envProxy))
+	proxyUser = firstNonEmpty(proxyUser, os.Getenv(envUser))
+	proxyPass = firstNonEmpty(proxyPass, os.Getenv(envPass))
+	if proxy == "" && (proxyUser != "" || proxyPass != "") {
+		// Credentials alone are not an error — HTTPS_PROXY may be set —
+		// but silently authenticating to nothing would be.
+		if os.Getenv("HTTPS_PROXY") == "" && os.Getenv("https_proxy") == "" &&
+			os.Getenv("HTTP_PROXY") == "" && os.Getenv("http_proxy") == "" {
+			return nil, fmt.Errorf("--proxy-user/--proxy-pass need a proxy: pass --proxy HOST:PORT or set %s", envProxy)
+		}
+	}
+	// A --proxy that isn't a HOST:PORT or URL names one of your own
+	// inbounds; look up its port and credentials instead of making the
+	// user retype them.
+	if proxy != "" && !looksLikeAddress(proxy) {
+		addr, u, p, err := resolveInboundProxy(cmd, proxy)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(out, "proxying through inbound %q (%s)\n", proxy, addr)
+		proxy = addr
+		proxyUser = firstNonEmpty(proxyUser, u)
+		proxyPass = firstNonEmpty(proxyPass, p)
+	}
+	return selfupdate.NewClient(proxy, proxyUser, proxyPass)
 }
 
 // daemonVersionDiffers catches a manual/global binary replacement that left

@@ -54,6 +54,7 @@ func rootCmd() *cobra.Command {
 		versionCmd(),
 		templateCmd(),
 		entryCmd(),
+		warpCmd(),
 		inboundCmd(),
 		subCmd(),
 		winnerCmd(),
