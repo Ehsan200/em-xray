@@ -242,7 +242,14 @@ emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>] [--mux
 emx entry mux <id> on|off                   multiplex streams over a few tunnels (per entry)
 emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
 emx entry test [id]
+```
 
+Renaming an entry or subscription updates everything bound to its name in one step: masters'
+dialer refs (`xray:NAME`, `xraysub:NAME`), inbound targets (`master:NAME`, `xray:NAME`) and the
+entry's traffic history. A pool keeps its slot, node ranking and parked nodes across the rename,
+and it applies live.
+
+```
 emx warp add [name] [--inbound NAME [-t TEMPLATE]] [--license KEY] [--dialer REFS] [--proxy P]
 
 emx in add [name] [-t TEMPLATE] [--to TARGET] [--host H] [--port N]

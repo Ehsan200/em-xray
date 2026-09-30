@@ -270,8 +270,9 @@ func (s *Store) UpdateEntry(e *XrayEntry) error { return s.db.Save(e).Error }
 
 func (s *Store) DeleteEntry(id uint) error { return s.db.Delete(&XrayEntry{}, id).Error }
 
-// RenameEntry renames an entry and cascades the change into every master's
-// Dialer that references it (xray:old → xray:new), atomically.
+// RenameEntry renames an entry and, atomically, everything bound to it by
+// name: every master's Dialer (xray:old → xray:new), every inbound Target
+// (master:old / xray:old), and the entry's traffic history (its outbound tag).
 func (s *Store) RenameEntry(id uint, newName string) error {
 	name, err := ValidName(newName)
 	if err != nil {
@@ -289,7 +290,13 @@ func (s *Store) RenameEntry(id uint, newName string) error {
 		if err := tx.Model(&XrayEntry{}).Where("id = ?", id).Update("name", name).Error; err != nil {
 			return err
 		}
-		return cascadeRename(tx, RefXray, old, name)
+		if err := cascadeRename(tx, RefXray, old, name); err != nil {
+			return err
+		}
+		if err := renameInboundTargets(tx, old, name); err != nil {
+			return err
+		}
+		return moveTrafficTag(tx, KindOutbound, OutboundTag(old), OutboundTag(name), name)
 	})
 }
 
@@ -331,6 +338,70 @@ func cascadeRename(tx *gorm.DB, kind, old, name string) error {
 		}
 	}
 	return nil
+}
+
+// renameInboundTargets repoints every inbound whose Target names the entry
+// (master:old or xray:old) at its new name.
+func renameInboundTargets(tx *gorm.DB, old, name string) error {
+	var ins []Inbound
+	if err := tx.Find(&ins).Error; err != nil {
+		return err
+	}
+	for _, in := range ins {
+		kind, n, err := ParseTarget(in.Target)
+		if err != nil || kind == TargetDirect || NormalizeName(n) != NormalizeName(old) {
+			continue
+		}
+		if err := tx.Model(&Inbound{}).Where("id = ?", in.ID).Update("target", kind+":"+name).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// moveTrafficTag carries a tag's traffic history (hourly buckets + lifetime
+// total) over to a new tag, adding into any rows the new tag already has.
+func moveTrafficTag(tx *gorm.DB, kind, oldTag, newTag, name string) error {
+	if oldTag == newTag {
+		return tx.Model(&TrafficTotal{}).Where("kind = ? AND tag = ?", kind, newTag).Update("name", name).Error
+	}
+	var buckets []TrafficBucket
+	if err := tx.Where("kind = ? AND tag = ?", kind, oldTag).Find(&buckets).Error; err != nil {
+		return err
+	}
+	for _, b := range buckets {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "kind"}, {Name: "tag"}, {Name: "hour_unix"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"up":   gorm.Expr("up + ?", b.Up),
+				"down": gorm.Expr("down + ?", b.Down),
+			}),
+		}).Create(&TrafficBucket{Kind: kind, Tag: newTag, HourUnix: b.HourUnix, Up: b.Up, Down: b.Down}).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Where("kind = ? AND tag = ?", kind, oldTag).Delete(&TrafficBucket{}).Error; err != nil {
+		return err
+	}
+	var total TrafficTotal
+	err := tx.Where("kind = ? AND tag = ?", kind, oldTag).First(&total).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "kind"}, {Name: "tag"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"up":   gorm.Expr("up + ?", total.Up),
+			"down": gorm.Expr("down + ?", total.Down),
+			"name": name,
+		}),
+	}).Create(&TrafficTotal{Kind: kind, Tag: newTag, Name: name, Up: total.Up, Down: total.Down, UpdatedAt: total.UpdatedAt}).Error; err != nil {
+		return err
+	}
+	return tx.Delete(&TrafficTotal{}, total.ID).Error
 }
 
 // NamesExist reports whether every given entry name exists.

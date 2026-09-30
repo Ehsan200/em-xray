@@ -80,9 +80,14 @@ func (s *Server) EntryRemove(ctx context.Context, req *emxv1.IdRequest) (*emxv1.
 }
 
 func (s *Server) EntryRename(ctx context.Context, req *emxv1.RenameRequest) (*emxv1.Empty, error) {
+	e, err := s.store.GetEntry(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
 	if err := s.store.RenameEntry(uint(req.Id), req.NewName); err != nil {
 		return nil, err
 	}
+	s.sup.RenamedRef(xray.RefXray, e.Name, xray.NormalizeName(req.NewName))
 	return &emxv1.Empty{}, s.sup.Reconcile()
 }
 

@@ -116,9 +116,14 @@ func (s *Server) SubSetNodeDisabled(ctx context.Context, req *emxv1.SubNodeDisab
 }
 
 func (s *Server) SubRename(ctx context.Context, req *emxv1.RenameRequest) (*emxv1.Empty, error) {
+	sub, err := s.store.GetSubscription(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
 	if err := s.store.RenameSubscription(uint(req.Id), req.NewName); err != nil {
 		return nil, err
 	}
+	s.sup.RenamedRef(xray.RefXraySub, sub.Name, xray.NormalizeName(req.NewName))
 	s.sup.SyncDialerMembers() // dialer refs rewritten; applied live
 	return &emxv1.Empty{}, nil
 }
