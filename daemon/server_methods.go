@@ -222,6 +222,36 @@ func (s *Server) Winners(context.Context, *emxv1.Empty) (*emxv1.WinnersReply, er
 	return &emxv1.WinnersReply{Winners: out}, nil
 }
 
+// PoolHealth returns every loaded pool's per-node health timeline and stats.
+func (s *Server) PoolHealth(_ context.Context, req *emxv1.PoolHealthRequest) (*emxv1.PoolHealthReply, error) {
+	pools := s.sup.PoolHealth(time.Duration(req.WindowSec) * time.Second)
+	out := make([]*emxv1.PoolHealthPool, 0, len(pools))
+	for _, p := range pools {
+		pp := &emxv1.PoolHealthPool{
+			Masters: p.Masters, Refs: p.Key, Since: p.Since.Unix(), Rounds: int32(p.Rounds),
+			PollSec: int32(nodeHealthPollInterval.Seconds()), PickLoss: int32(p.PickLoss),
+			LossSec: int32(p.LossSec), ChurnPct: int32(p.ChurnPct), Strategy: p.Strategy,
+			Auto: p.Auto, AutoReason: p.AutoReason,
+		}
+		if !p.AutoSince.IsZero() {
+			pp.AutoSince = p.AutoSince.Unix()
+		}
+		for _, n := range p.Nodes {
+			states := make([]byte, len(n.States))
+			for i, st := range n.States {
+				states[i] = byte(st)
+			}
+			pp.Nodes = append(pp.Nodes, &emxv1.PoolHealthNode{
+				Name: n.Name, Key: n.Key, Role: n.Role, States: states,
+				UptimePct: int32(n.UptimePct), Flips: int32(n.Flips),
+				AvgRttMs: int32(n.AvgRTTms), LastRttMs: int32(n.LastRTTms),
+			})
+		}
+		out = append(out, pp)
+	}
+	return &emxv1.PoolHealthReply{Pools: out}, nil
+}
+
 // ---- traffic ---------------------------------------------------------------
 
 // Traffic returns per-inbound/outbound lifetime totals plus windowed totals and
@@ -333,6 +363,9 @@ func sortTrafficDesc(items []*emxv1.TrafficItem) {
 // ---- inbounds --------------------------------------------------------------
 
 func (s *Server) InboundAdd(ctx context.Context, req *emxv1.InboundAddRequest) (*emxv1.InboundReply, error) {
+	if _, err := s.checkTarget(req.Target); err != nil {
+		return nil, err
+	}
 	in, err := xray.NewInboundFromTemplate(req.Name, req.Template, req.Target)
 	if err != nil {
 		return nil, err
@@ -424,7 +457,7 @@ func (s *Server) InboundSetConfig(ctx context.Context, req *emxv1.SetConfigReque
 	// Preserve identity: the id and created-at can't be changed by an edit.
 	edited.ID = cur.ID
 	edited.CreatedAt = cur.CreatedAt
-	if edited.Target, err = xray.CanonicalTarget(edited.Target); err != nil {
+	if edited.Target, err = s.checkTarget(edited.Target); err != nil {
 		return nil, err
 	}
 	if err := xray.Materialize(&edited); err != nil {

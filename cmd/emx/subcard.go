@@ -37,6 +37,8 @@ func renderSubCard(s *emxv1.SubInfo) string {
 		row("Expires", colorExpiry(s.Expire)),
 		row("Fetched", colorFetch(s.LastFetched)),
 		row("Interval", intervalLine(s.IntervalSec)),
+		row("Strategy", strategyLine(s.Strategy)),
+		row("Strategy", strategyLine(s.Strategy)),
 		row("Node cap", capLine(s.NodeCap)),
 		row("Agent", orDash(s.UserAgent)),
 		row("URL", truncMiddle(s.Url, 46)),
@@ -121,4 +123,17 @@ func truncMiddle(s string, max int) string {
 	head := (max - 1) / 2
 	tail := max - 1 - head
 	return string(r[:head]) + "…" + string(r[len(r)-tail:])
+}
+
+// strategyLine describes a subscription's pool switch strategy.
+func strategyLine(st string) string {
+	switch st {
+	case "stable":
+		return "stable (sticky pick, parks dead nodes)"
+	case "agile":
+		return "agile (follows nodes that come and go)"
+	case "manual":
+		return "manual (only pinned nodes)"
+	}
+	return "auto"
 }

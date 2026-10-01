@@ -48,15 +48,40 @@ func cutLoopbackSockets(pid int, addrs []netip.Addr) (int, error) {
 	if len(want) == 0 {
 		return 0, nil
 	}
-	n, err := destroySockets(want)
+	return cutSockets(pid, func(src, dst netip.AddrPort) bool {
+		return want[src.Addr().As4()] || want[dst.Addr().As4()]
+	})
+}
+
+// cutRemoteEndpoints closes every IPv4 TCP and UDP socket connected to one of
+// eps (remote address and port), and returns how many it closed. pid is the
+// xray process holding them. Same mechanism as cutLoopbackSockets.
+func cutRemoteEndpoints(pid int, eps []netip.AddrPort) (int, error) {
+	want := map[netip.AddrPort]bool{}
+	for _, ep := range eps {
+		if ep.Addr().Is4() {
+			want[ep] = true
+		}
+	}
+	if len(want) == 0 {
+		return 0, nil
+	}
+	return cutSockets(pid, func(_, dst netip.AddrPort) bool { return want[dst] })
+}
+
+// sockMatch selects sockets by their local (src) and remote (dst) endpoint.
+type sockMatch func(src, dst netip.AddrPort) bool
+
+func cutSockets(pid int, match sockMatch) (int, error) {
+	n, err := destroySockets(match)
 	if errors.Is(err, unix.EOPNOTSUPP) && pid > 0 {
-		return shutdownProcSockets(pid, want)
+		return shutdownProcSockets(pid, match)
 	}
 	return n, err
 }
 
-// destroySockets destroys the sockets touching want via sock_diag.
-func destroySockets(want map[[4]byte]bool) (int, error) {
+// destroySockets destroys the sockets match selects via sock_diag.
+func destroySockets(match sockMatch) (int, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, unix.NETLINK_SOCK_DIAG)
 	if err != nil {
 		return 0, fmt.Errorf("netlink socket: %w", err)
@@ -74,7 +99,7 @@ func destroySockets(want map[[4]byte]bool) (int, error) {
 	nl := &diagConn{fd: fd}
 	n := 0
 	for _, proto := range []uint8{unix.IPPROTO_TCP, unix.IPPROTO_UDP} {
-		ids, err := nl.dump(proto, want)
+		ids, err := nl.dump(proto, match)
 		if err != nil {
 			return n, err
 		}
@@ -93,19 +118,19 @@ func destroySockets(want map[[4]byte]bool) (int, error) {
 }
 
 // shutdownProcSockets is the fallback for kernels without socket destroy: it
-// finds pid's sockets touching want (/proc/<pid>/net + /proc/<pid>/fd), takes
+// finds pid's sockets match selects (/proc/<pid>/net + /proc/<pid>/fd), takes
 // a copy of each descriptor with pidfd_getfd and shuts it down. The socket is
 // shared, so xray reads EOF and tears the relay down just the same. Needs
 // Linux 5.6+ and ptrace rights over pid, which the daemon has as xray's
 // parent running as root.
-func shutdownProcSockets(pid int, want map[[4]byte]bool) (int, error) {
+func shutdownProcSockets(pid int, match sockMatch) (int, error) {
 	inodes := map[string]bool{}
 	for _, proto := range []string{"tcp", "udp"} {
 		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/net/%s", pid, proto))
 		if err != nil {
 			return 0, err
 		}
-		for ino := range procNetInodes(string(b), proto == "tcp", want) {
+		for ino := range procNetInodes(string(b), proto == "tcp", match) {
 			inodes[ino] = true
 		}
 	}
@@ -147,10 +172,9 @@ func shutdownProcSockets(pid int, want map[[4]byte]bool) (int, error) {
 	return n, nil
 }
 
-// procNetInodes returns the socket inodes of a /proc/net/{tcp,udp} table
-// whose local or remote address is in want, skipping TCP sockets with nothing
-// open to cut.
-func procNetInodes(table string, tcp bool, want map[[4]byte]bool) map[string]bool {
+// procNetInodes returns the socket inodes of a /proc/net/{tcp,udp} table that
+// match selects, skipping TCP sockets with nothing open to cut.
+func procNetInodes(table string, tcp bool, match sockMatch) map[string]bool {
 	out := map[string]bool{}
 	for _, line := range strings.Split(table, "\n")[1:] {
 		f := strings.Fields(line)
@@ -162,27 +186,34 @@ func procNetInodes(table string, tcp bool, want map[[4]byte]bool) map[string]boo
 				continue
 			}
 		}
-		if procNetAddrIn(f[1], want) || procNetAddrIn(f[2], want) {
+		src, ok1 := procNetAddr(f[1])
+		dst, ok2 := procNetAddr(f[2])
+		if ok1 && ok2 && match(src, dst) {
 			out[f[9]] = true
 		}
 	}
 	return out
 }
 
-// procNetAddrIn parses a /proc/net "0100007F:1F90" address: the IPv4 address
-// is the in-memory (network order) word printed as a native integer.
-func procNetAddrIn(s string, want map[[4]byte]bool) bool {
-	host, _, ok := strings.Cut(s, ":")
+// procNetAddr parses a /proc/net "0100007F:1F90" endpoint: the IPv4 address
+// is the in-memory (network order) word printed as a native integer, the port
+// a plain hex number.
+func procNetAddr(s string) (netip.AddrPort, bool) {
+	host, port, ok := strings.Cut(s, ":")
 	if !ok || len(host) != 8 {
-		return false
+		return netip.AddrPort{}, false
 	}
 	v, err := strconv.ParseUint(host, 16, 32)
 	if err != nil {
-		return false
+		return netip.AddrPort{}, false
+	}
+	p, err := strconv.ParseUint(port, 16, 16)
+	if err != nil {
+		return netip.AddrPort{}, false
 	}
 	var a [4]byte
 	binary.NativeEndian.PutUint32(a[:], uint32(v))
-	return want[a]
+	return netip.AddrPortFrom(netip.AddrFrom4(a), uint16(p)), true
 }
 
 type diagConn struct {
@@ -252,8 +283,8 @@ func (c *diagConn) each(seq uint32, fn func(data []byte)) error {
 	}
 }
 
-// dump returns the socket ids of every live proto socket touching want.
-func (c *diagConn) dump(proto uint8, want map[[4]byte]bool) ([][]byte, error) {
+// dump returns the socket ids of every live proto socket match selects.
+func (c *diagConn) dump(proto uint8, match sockMatch) ([][]byte, error) {
 	seq, err := c.request(unix.SOCK_DIAG_BY_FAMILY, unix.NLM_F_REQUEST|unix.NLM_F_DUMP, proto, nil)
 	if err != nil {
 		return nil, err
@@ -270,10 +301,13 @@ func (c *diagConn) dump(proto uint8, want map[[4]byte]bool) ([][]byte, error) {
 			}
 		}
 		id := m[4 : 4+diagSockIDLen]
+		// inet_diag_sockid: sport, dport (big endian), src[16], dst[16].
 		var src, dst [4]byte
 		copy(src[:], id[4:8])
 		copy(dst[:], id[20:24])
-		if want[src] || want[dst] {
+		sp := netip.AddrPortFrom(netip.AddrFrom4(src), binary.BigEndian.Uint16(id[0:2]))
+		dp := netip.AddrPortFrom(netip.AddrFrom4(dst), binary.BigEndian.Uint16(id[2:4]))
+		if match(sp, dp) {
 			ids = append(ids, append([]byte(nil), id...))
 		}
 	})

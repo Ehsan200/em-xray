@@ -18,6 +18,7 @@ service Daemon {
   rpc LogLevel(LogLevelRequest) returns (LogLevelReply); // set (non-empty) and/or read
   rpc LogCap(LogCapRequest) returns (LogCapReply);       // per-file log size cap (MB)
   rpc ProbeInterval(ProbeIntervalRequest) returns (ProbeIntervalReply); // observatory probe cadence
+  rpc AutoStrategy(AutoStrategyRequest) returns (AutoStrategyReply);    // auto strategy thresholds
 
   // Templates.
   rpc TemplateList(Empty) returns (TemplateListReply);
@@ -39,6 +40,8 @@ service Daemon {
   rpc InboundDuplicate(DuplicateRequest) returns (InboundReply);
   rpc InboundGetConfig(IdRequest) returns (ConfigReply);    // editable inbound JSON
   rpc InboundSetConfig(SetConfigRequest) returns (InboundReply);
+  rpc InboundSetTarget(InboundTargetRequest) returns (InboundReply); // change where its traffic egresses
+  rpc Interfaces(Empty) returns (InterfacesReply);                   // this server's network interfaces (iface: targets)
 
   // Multi-user: extra clients on an inbound with per-user traffic + byte caps.
   rpc InboundUserAdd(InboundUserAddRequest) returns (InboundUserReply);
@@ -48,6 +51,8 @@ service Daemon {
 
   // Winner: the current fastest (balancer-selected) node per master.
   rpc Winners(Empty) returns (WinnersReply);
+  // PoolHealth: per-node health timeline + flap stats for every loaded pool.
+  rpc PoolHealth(PoolHealthRequest) returns (PoolHealthReply);
 
   // Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
   rpc Traffic(TrafficRequest) returns (TrafficReply);
@@ -68,6 +73,7 @@ service Daemon {
   rpc SubRefresh(SubRefreshRequest) returns (SubRefreshReply);
   rpc SubNodes(IdRequest) returns (SubNodesReply);
   rpc SubSetNodeDisabled(SubNodeDisabledRequest) returns (Empty);
+  rpc SubSetNodePinned(SubNodePinnedRequest) returns (Empty); // manual strategy pins
   rpc SubRename(RenameRequest) returns (Empty);
   rpc SubSetOptions(SubOptionsRequest) returns (SubReply);
 }
@@ -104,6 +110,7 @@ message SubOptionsRequest {
   int32 interval_sec = 2; // 0 => 12h default
   int32 node_cap = 3;     // 0 => 30 default
   string user_agent = 4;  // "" => v2rayN default
+  string strategy = 5;    // auto | stable | agile | manual; "" => keep current
 }
 
 message RenameRequest {
@@ -125,6 +132,36 @@ message WinnerInfo {
   int32 alive = 6;           // members whose latest pings succeed; -1 = unknown
 }
 message WinnersReply { repeated WinnerInfo winners = 1; }
+
+message PoolHealthRequest { int64 window_sec = 1; } // 0 => the whole kept history (30m)
+message PoolHealthNode {
+  string name = 1;
+  string key = 2;          // fingerprint | xray-NAME
+  string role = 3;         // latest round: active | spare | idle | parked | gone
+  // One byte per round, oldest→newest: 0 not in pool, 1 unknown, 2 alive,
+  // 3 dead, 4 parked, 5 uplink down.
+  bytes states = 4;
+  int32 uptime_pct = 5;    // -1 = no data
+  int32 flips = 6;         // alive<->dead transitions in the window
+  int32 avg_rtt_ms = 7;
+  int32 last_rtt_ms = 8;
+}
+message PoolHealthPool {
+  repeated string masters = 1;
+  string refs = 2;         // the dialer refs the pool serves, e.g. xraysub:NAME
+  int64 since = 3;         // unix time of the first round shown
+  int32 rounds = 4;
+  int32 poll_sec = 5;      // seconds between rounds
+  int32 pick_loss = 6;     // times the whole pick (active + spare) went dead at once
+  int32 loss_sec = 7;      // time spent with the whole pick dead
+  int32 churn_pct = 8;     // share of observed nodes that flipped at least once
+  repeated PoolHealthNode nodes = 9;
+  string strategy = 10;    // effective switch strategy: stable | agile | manual
+  bool auto = 11;          // strategy chosen by the daemon's auto classifier
+  int64 auto_since = 12;   // auto pools: unix time the current mode began
+  string auto_reason = 13; // auto pools: why
+}
+message PoolHealthReply { repeated PoolHealthPool pools = 1; }
 
 message TrafficRequest { int64 window_sec = 1; } // 0 => 24h
 message TrafficItem {
@@ -183,6 +220,7 @@ message SubInfo {
   string user_agent = 13;
   int32 interval_sec = 14;
   int32 node_cap = 15;
+  string strategy = 16;   // auto | stable | agile | manual
 }
 message SubReply { SubInfo sub = 1; }
 message SubListReply { repeated SubInfo subs = 1; }
@@ -202,6 +240,7 @@ message NodeInfo {
   int32 latency_ms = 5;
   int64 parked_until = 6; // unix seconds; non-zero => dead node left out of its pool until then
   string rejected = 7;    // non-empty => xray refuses this node's config (the reason); left out of its pool
+  bool pinned = 8;        // a manual-strategy pool routes only through pinned nodes
 }
 message SubNodesReply { repeated NodeInfo nodes = 1; }
 
@@ -209,6 +248,15 @@ message SubNodeDisabledRequest {
   uint32 sub_id = 1;
   string fingerprint = 2;
   bool disabled = 3;
+}
+
+// SubNodePinnedRequest pins/unpins one node (durable, by fingerprint), or
+// with clear_all unpins every node of the subscription.
+message SubNodePinnedRequest {
+  uint32 sub_id = 1;
+  string fingerprint = 2;
+  bool pinned = 3;
+  bool clear_all = 4;
 }
 
 message Empty {}
@@ -289,6 +337,28 @@ message ProbeIntervalRequest {
 }
 message ProbeIntervalReply { int32 sec = 1; }
 
+// AutoTuning: thresholds of the auto strategy, judged over window_min minutes
+// of pool health. Flapping = pick_loss whole-pick losses (0 = off), or
+// flapping_pct% of nodes (at least 2) flipping alive<->dead flips+ times.
+// Back to stable after calm_min minutes without flapping.
+message AutoTuning {
+  int32 window_min = 1;
+  int32 flips = 2;
+  int32 flapping_pct = 3;
+  int32 pick_loss = 4;
+  int32 calm_min = 5;
+}
+// AutoStrategyRequest sets the thresholds when change; always returns the
+// current ones, and the defaults.
+message AutoStrategyRequest {
+  AutoTuning set = 1;
+  bool change = 2;
+}
+message AutoStrategyReply {
+  AutoTuning tuning = 1;
+  AutoTuning defaults = 2;
+}
+
 // LogCapRequest changes the per-file log cap (MB) when change=true (0 disables
 // rotation); always returns the current cap. Peak on-disk per log is ~2× cap.
 message LogCapRequest {
@@ -356,6 +426,19 @@ message InboundInfo {
   string xhttp_mode = 16;
 }
 message InboundReply { InboundInfo inbound = 1; }
+
+message InboundTargetRequest {
+  uint32 id = 1;
+  string target = 2; // master:NAME | xray:NAME | iface:NAME | direct
+}
+
+message NetInterface {
+  string name = 1;
+  repeated string addrs = 2; // CIDRs
+  bool up = 3;
+  bool loopback = 4;
+}
+message InterfacesReply { repeated NetInterface interfaces = 1; }
 message InboundListReply { repeated InboundInfo inbounds = 1; }
 
 message InboundUserAddRequest {

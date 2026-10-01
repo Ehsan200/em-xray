@@ -28,6 +28,7 @@ const (
 	Daemon_LogLevel_FullMethodName              = "/emx.v1.Daemon/LogLevel"
 	Daemon_LogCap_FullMethodName                = "/emx.v1.Daemon/LogCap"
 	Daemon_ProbeInterval_FullMethodName         = "/emx.v1.Daemon/ProbeInterval"
+	Daemon_AutoStrategy_FullMethodName          = "/emx.v1.Daemon/AutoStrategy"
 	Daemon_TemplateList_FullMethodName          = "/emx.v1.Daemon/TemplateList"
 	Daemon_EntryAdd_FullMethodName              = "/emx.v1.Daemon/EntryAdd"
 	Daemon_EntryList_FullMethodName             = "/emx.v1.Daemon/EntryList"
@@ -43,11 +44,14 @@ const (
 	Daemon_InboundDuplicate_FullMethodName      = "/emx.v1.Daemon/InboundDuplicate"
 	Daemon_InboundGetConfig_FullMethodName      = "/emx.v1.Daemon/InboundGetConfig"
 	Daemon_InboundSetConfig_FullMethodName      = "/emx.v1.Daemon/InboundSetConfig"
+	Daemon_InboundSetTarget_FullMethodName      = "/emx.v1.Daemon/InboundSetTarget"
+	Daemon_Interfaces_FullMethodName            = "/emx.v1.Daemon/Interfaces"
 	Daemon_InboundUserAdd_FullMethodName        = "/emx.v1.Daemon/InboundUserAdd"
 	Daemon_InboundUserList_FullMethodName       = "/emx.v1.Daemon/InboundUserList"
 	Daemon_InboundUserRemove_FullMethodName     = "/emx.v1.Daemon/InboundUserRemove"
 	Daemon_InboundUserSetEnabled_FullMethodName = "/emx.v1.Daemon/InboundUserSetEnabled"
 	Daemon_Winners_FullMethodName               = "/emx.v1.Daemon/Winners"
+	Daemon_PoolHealth_FullMethodName            = "/emx.v1.Daemon/PoolHealth"
 	Daemon_Traffic_FullMethodName               = "/emx.v1.Daemon/Traffic"
 	Daemon_TrafficLive_FullMethodName           = "/emx.v1.Daemon/TrafficLive"
 	Daemon_TrafficRetention_FullMethodName      = "/emx.v1.Daemon/TrafficRetention"
@@ -60,6 +64,7 @@ const (
 	Daemon_SubRefresh_FullMethodName            = "/emx.v1.Daemon/SubRefresh"
 	Daemon_SubNodes_FullMethodName              = "/emx.v1.Daemon/SubNodes"
 	Daemon_SubSetNodeDisabled_FullMethodName    = "/emx.v1.Daemon/SubSetNodeDisabled"
+	Daemon_SubSetNodePinned_FullMethodName      = "/emx.v1.Daemon/SubSetNodePinned"
 	Daemon_SubRename_FullMethodName             = "/emx.v1.Daemon/SubRename"
 	Daemon_SubSetOptions_FullMethodName         = "/emx.v1.Daemon/SubSetOptions"
 )
@@ -81,6 +86,7 @@ type DaemonClient interface {
 	LogLevel(ctx context.Context, in *LogLevelRequest, opts ...grpc.CallOption) (*LogLevelReply, error)
 	LogCap(ctx context.Context, in *LogCapRequest, opts ...grpc.CallOption) (*LogCapReply, error)
 	ProbeInterval(ctx context.Context, in *ProbeIntervalRequest, opts ...grpc.CallOption) (*ProbeIntervalReply, error)
+	AutoStrategy(ctx context.Context, in *AutoStrategyRequest, opts ...grpc.CallOption) (*AutoStrategyReply, error)
 	// Templates.
 	TemplateList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*TemplateListReply, error)
 	// Entries (outbounds; a non-empty dialer makes one a master).
@@ -99,6 +105,8 @@ type DaemonClient interface {
 	InboundDuplicate(ctx context.Context, in *DuplicateRequest, opts ...grpc.CallOption) (*InboundReply, error)
 	InboundGetConfig(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*ConfigReply, error)
 	InboundSetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*InboundReply, error)
+	InboundSetTarget(ctx context.Context, in *InboundTargetRequest, opts ...grpc.CallOption) (*InboundReply, error)
+	Interfaces(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*InterfacesReply, error)
 	// Multi-user: extra clients on an inbound with per-user traffic + byte caps.
 	InboundUserAdd(ctx context.Context, in *InboundUserAddRequest, opts ...grpc.CallOption) (*InboundUserReply, error)
 	InboundUserList(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*InboundUserListReply, error)
@@ -106,6 +114,8 @@ type DaemonClient interface {
 	InboundUserSetEnabled(ctx context.Context, in *SetEnabledRequest, opts ...grpc.CallOption) (*Empty, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WinnersReply, error)
+	// PoolHealth: per-node health timeline + flap stats for every loaded pool.
+	PoolHealth(ctx context.Context, in *PoolHealthRequest, opts ...grpc.CallOption) (*PoolHealthReply, error)
 	// Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
 	Traffic(ctx context.Context, in *TrafficRequest, opts ...grpc.CallOption) (*TrafficReply, error)
 	// TrafficLive: current cumulative counters, for a client-computed live rate.
@@ -123,6 +133,7 @@ type DaemonClient interface {
 	SubRefresh(ctx context.Context, in *SubRefreshRequest, opts ...grpc.CallOption) (*SubRefreshReply, error)
 	SubNodes(ctx context.Context, in *IdRequest, opts ...grpc.CallOption) (*SubNodesReply, error)
 	SubSetNodeDisabled(ctx context.Context, in *SubNodeDisabledRequest, opts ...grpc.CallOption) (*Empty, error)
+	SubSetNodePinned(ctx context.Context, in *SubNodePinnedRequest, opts ...grpc.CallOption) (*Empty, error)
 	SubRename(ctx context.Context, in *RenameRequest, opts ...grpc.CallOption) (*Empty, error)
 	SubSetOptions(ctx context.Context, in *SubOptionsRequest, opts ...grpc.CallOption) (*SubReply, error)
 }
@@ -219,6 +230,16 @@ func (c *daemonClient) ProbeInterval(ctx context.Context, in *ProbeIntervalReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ProbeIntervalReply)
 	err := c.cc.Invoke(ctx, Daemon_ProbeInterval_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) AutoStrategy(ctx context.Context, in *AutoStrategyRequest, opts ...grpc.CallOption) (*AutoStrategyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutoStrategyReply)
+	err := c.cc.Invoke(ctx, Daemon_AutoStrategy_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -375,6 +396,26 @@ func (c *daemonClient) InboundSetConfig(ctx context.Context, in *SetConfigReques
 	return out, nil
 }
 
+func (c *daemonClient) InboundSetTarget(ctx context.Context, in *InboundTargetRequest, opts ...grpc.CallOption) (*InboundReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InboundReply)
+	err := c.cc.Invoke(ctx, Daemon_InboundSetTarget_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) Interfaces(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*InterfacesReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InterfacesReply)
+	err := c.cc.Invoke(ctx, Daemon_Interfaces_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) InboundUserAdd(ctx context.Context, in *InboundUserAddRequest, opts ...grpc.CallOption) (*InboundUserReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InboundUserReply)
@@ -419,6 +460,16 @@ func (c *daemonClient) Winners(ctx context.Context, in *Empty, opts ...grpc.Call
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WinnersReply)
 	err := c.cc.Invoke(ctx, Daemon_Winners_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) PoolHealth(ctx context.Context, in *PoolHealthRequest, opts ...grpc.CallOption) (*PoolHealthReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PoolHealthReply)
+	err := c.cc.Invoke(ctx, Daemon_PoolHealth_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -545,6 +596,16 @@ func (c *daemonClient) SubSetNodeDisabled(ctx context.Context, in *SubNodeDisabl
 	return out, nil
 }
 
+func (c *daemonClient) SubSetNodePinned(ctx context.Context, in *SubNodePinnedRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Daemon_SubSetNodePinned_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonClient) SubRename(ctx context.Context, in *RenameRequest, opts ...grpc.CallOption) (*Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Empty)
@@ -582,6 +643,7 @@ type DaemonServer interface {
 	LogLevel(context.Context, *LogLevelRequest) (*LogLevelReply, error)
 	LogCap(context.Context, *LogCapRequest) (*LogCapReply, error)
 	ProbeInterval(context.Context, *ProbeIntervalRequest) (*ProbeIntervalReply, error)
+	AutoStrategy(context.Context, *AutoStrategyRequest) (*AutoStrategyReply, error)
 	// Templates.
 	TemplateList(context.Context, *Empty) (*TemplateListReply, error)
 	// Entries (outbounds; a non-empty dialer makes one a master).
@@ -600,6 +662,8 @@ type DaemonServer interface {
 	InboundDuplicate(context.Context, *DuplicateRequest) (*InboundReply, error)
 	InboundGetConfig(context.Context, *IdRequest) (*ConfigReply, error)
 	InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error)
+	InboundSetTarget(context.Context, *InboundTargetRequest) (*InboundReply, error)
+	Interfaces(context.Context, *Empty) (*InterfacesReply, error)
 	// Multi-user: extra clients on an inbound with per-user traffic + byte caps.
 	InboundUserAdd(context.Context, *InboundUserAddRequest) (*InboundUserReply, error)
 	InboundUserList(context.Context, *IdRequest) (*InboundUserListReply, error)
@@ -607,6 +671,8 @@ type DaemonServer interface {
 	InboundUserSetEnabled(context.Context, *SetEnabledRequest) (*Empty, error)
 	// Winner: the current fastest (balancer-selected) node per master.
 	Winners(context.Context, *Empty) (*WinnersReply, error)
+	// PoolHealth: per-node health timeline + flap stats for every loaded pool.
+	PoolHealth(context.Context, *PoolHealthRequest) (*PoolHealthReply, error)
 	// Traffic: per-inbound/outbound byte totals + hourly buckets for charts.
 	Traffic(context.Context, *TrafficRequest) (*TrafficReply, error)
 	// TrafficLive: current cumulative counters, for a client-computed live rate.
@@ -624,6 +690,7 @@ type DaemonServer interface {
 	SubRefresh(context.Context, *SubRefreshRequest) (*SubRefreshReply, error)
 	SubNodes(context.Context, *IdRequest) (*SubNodesReply, error)
 	SubSetNodeDisabled(context.Context, *SubNodeDisabledRequest) (*Empty, error)
+	SubSetNodePinned(context.Context, *SubNodePinnedRequest) (*Empty, error)
 	SubRename(context.Context, *RenameRequest) (*Empty, error)
 	SubSetOptions(context.Context, *SubOptionsRequest) (*SubReply, error)
 	mustEmbedUnimplementedDaemonServer()
@@ -662,6 +729,9 @@ func (UnimplementedDaemonServer) LogCap(context.Context, *LogCapRequest) (*LogCa
 }
 func (UnimplementedDaemonServer) ProbeInterval(context.Context, *ProbeIntervalRequest) (*ProbeIntervalReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProbeInterval not implemented")
+}
+func (UnimplementedDaemonServer) AutoStrategy(context.Context, *AutoStrategyRequest) (*AutoStrategyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method AutoStrategy not implemented")
 }
 func (UnimplementedDaemonServer) TemplateList(context.Context, *Empty) (*TemplateListReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method TemplateList not implemented")
@@ -708,6 +778,12 @@ func (UnimplementedDaemonServer) InboundGetConfig(context.Context, *IdRequest) (
 func (UnimplementedDaemonServer) InboundSetConfig(context.Context, *SetConfigRequest) (*InboundReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method InboundSetConfig not implemented")
 }
+func (UnimplementedDaemonServer) InboundSetTarget(context.Context, *InboundTargetRequest) (*InboundReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method InboundSetTarget not implemented")
+}
+func (UnimplementedDaemonServer) Interfaces(context.Context, *Empty) (*InterfacesReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Interfaces not implemented")
+}
 func (UnimplementedDaemonServer) InboundUserAdd(context.Context, *InboundUserAddRequest) (*InboundUserReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method InboundUserAdd not implemented")
 }
@@ -722,6 +798,9 @@ func (UnimplementedDaemonServer) InboundUserSetEnabled(context.Context, *SetEnab
 }
 func (UnimplementedDaemonServer) Winners(context.Context, *Empty) (*WinnersReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Winners not implemented")
+}
+func (UnimplementedDaemonServer) PoolHealth(context.Context, *PoolHealthRequest) (*PoolHealthReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method PoolHealth not implemented")
 }
 func (UnimplementedDaemonServer) Traffic(context.Context, *TrafficRequest) (*TrafficReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Traffic not implemented")
@@ -758,6 +837,9 @@ func (UnimplementedDaemonServer) SubNodes(context.Context, *IdRequest) (*SubNode
 }
 func (UnimplementedDaemonServer) SubSetNodeDisabled(context.Context, *SubNodeDisabledRequest) (*Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubSetNodeDisabled not implemented")
+}
+func (UnimplementedDaemonServer) SubSetNodePinned(context.Context, *SubNodePinnedRequest) (*Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubSetNodePinned not implemented")
 }
 func (UnimplementedDaemonServer) SubRename(context.Context, *RenameRequest) (*Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubRename not implemented")
@@ -944,6 +1026,24 @@ func _Daemon_ProbeInterval_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).ProbeInterval(ctx, req.(*ProbeIntervalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_AutoStrategy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AutoStrategyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).AutoStrategy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_AutoStrategy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).AutoStrategy(ctx, req.(*AutoStrategyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1218,6 +1318,42 @@ func _Daemon_InboundSetConfig_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_InboundSetTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InboundTargetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).InboundSetTarget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_InboundSetTarget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).InboundSetTarget(ctx, req.(*InboundTargetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_Interfaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).Interfaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_Interfaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).Interfaces(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_InboundUserAdd_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InboundUserAddRequest)
 	if err := dec(in); err != nil {
@@ -1304,6 +1440,24 @@ func _Daemon_Winners_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).Winners(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_PoolHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PoolHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).PoolHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_PoolHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).PoolHealth(ctx, req.(*PoolHealthRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1524,6 +1678,24 @@ func _Daemon_SubSetNodeDisabled_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Daemon_SubSetNodePinned_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubNodePinnedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).SubSetNodePinned(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_SubSetNodePinned_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).SubSetNodePinned(ctx, req.(*SubNodePinnedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Daemon_SubRename_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RenameRequest)
 	if err := dec(in); err != nil {
@@ -1604,6 +1776,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_ProbeInterval_Handler,
 		},
 		{
+			MethodName: "AutoStrategy",
+			Handler:    _Daemon_AutoStrategy_Handler,
+		},
+		{
 			MethodName: "TemplateList",
 			Handler:    _Daemon_TemplateList_Handler,
 		},
@@ -1664,6 +1840,14 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Daemon_InboundSetConfig_Handler,
 		},
 		{
+			MethodName: "InboundSetTarget",
+			Handler:    _Daemon_InboundSetTarget_Handler,
+		},
+		{
+			MethodName: "Interfaces",
+			Handler:    _Daemon_Interfaces_Handler,
+		},
+		{
 			MethodName: "InboundUserAdd",
 			Handler:    _Daemon_InboundUserAdd_Handler,
 		},
@@ -1682,6 +1866,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Winners",
 			Handler:    _Daemon_Winners_Handler,
+		},
+		{
+			MethodName: "PoolHealth",
+			Handler:    _Daemon_PoolHealth_Handler,
 		},
 		{
 			MethodName: "Traffic",
@@ -1730,6 +1918,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubSetNodeDisabled",
 			Handler:    _Daemon_SubSetNodeDisabled_Handler,
+		},
+		{
+			MethodName: "SubSetNodePinned",
+			Handler:    _Daemon_SubSetNodePinned_Handler,
 		},
 		{
 			MethodName: "SubRename",

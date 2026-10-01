@@ -52,6 +52,8 @@ func (s *Supervisor) RenamedRef(kind, old, name string) {
 	if oldMember != "" {
 		s.parker.rename(oldMember, newMember)
 	}
+	s.history.rename(rekey, oldMember, newMember)
+	s.auto.rename(rekey)
 }
 
 // rename moves a member's score to its new tag.

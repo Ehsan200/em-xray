@@ -52,6 +52,10 @@ type Supervisor struct {
 	// parker leaves dead pool nodes out of their slot (see nodepark.go).
 	parker *nodeParker
 	picker *nodePicker // ranks pool members (nodepick.go)
+	// history records pool health per poll for `emx health` (nodehistory.go).
+	history *nodeHistory
+	// auto picks stable or agile for pools left on auto (autostrategy.go).
+	auto *autoClassifier
 	// rejected are pool members xray refused (see validate.go).
 	rejectedMu sync.Mutex
 	rejected   map[string]rejection
@@ -69,7 +73,7 @@ const (
 )
 
 func NewSupervisor(store *xray.Store, p paths.Paths, logger *log.Logger) *Supervisor {
-	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), picker: newNodePicker(), rejected: map[string]rejection{}}
+	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), picker: newNodePicker(), history: newNodeHistory(), auto: newAutoClassifier(), rejected: map[string]rejection{}}
 	s.wd = NewWatchdog(xrayCmdFactory(p, logger), logger)
 	return s
 }
@@ -255,6 +259,8 @@ func (s *Supervisor) applyLocked(inbounds []xray.Inbound, slots []xray.Slot, cfg
 		// changed would keep riding the old path: close them so their
 		// clients reconnect through the new one (sockcut.go).
 		s.cutMovedMasters(s.loadedSlots, slots)
+		// Likewise a manual pool's connections on nodes no longer pinned.
+		s.cutUnpinned(s.loadedSlots, slots)
 	default:
 		s.log.Print("reconcile: restarting xray with new config")
 		s.restarts.Add(1)
@@ -515,16 +521,127 @@ func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, 
 		for _, m := range resolved {
 			present[m.Key] = true
 		}
-		members := withoutParked(s.withoutRejected(resolved), parked)
+		strategy, auto := s.poolStrategy(key, refs)
+		members := s.withoutRejected(resolved)
+		var pinned []string
+		if strategy == xray.StrategyManual {
+			if pinned = s.poolPins(refs, members); len(pinned) == 0 {
+				s.log.Printf("master %q: manual pool has no pinned node in it — running it stable until one is pinned", e.Name)
+				strategy = xray.StrategyStable
+			}
+		}
+		if strategy == xray.StrategyAgile || strategy == xray.StrategyManual {
+			keys := make([]string, len(members))
+			for i, m := range members {
+				keys[i] = m.Key
+			}
+			if back := s.parker.unpark(keys); len(back) > 0 {
+				s.log.Printf("master %q: %s pool — %d parked node(s) back in the pool", e.Name, strategy, len(back))
+			}
+		} else {
+			members = withoutParked(members, parked)
+		}
 		if len(members) == 0 {
 			s.log.Printf("master %q: dialer resolved to 0 members — master blocked until pool fills", e.Name)
 		}
 		slotByKey[key] = len(slots)
-		slots = append(slots, xray.Slot{Master: e.Name, Key: key, Index: -1, Members: members})
+		slots = append(slots, xray.Slot{Master: e.Name, Key: key, Index: -1, Members: members, Strategy: strategy, Auto: auto, Pinned: pinned})
 	}
 	slots = s.assignSlotIndices(slots)
 	s.picker.pickSlots(slots, s.loadedSlots)
+	s.logStrategyChanges(slots)
 	return slots, nil
+}
+
+// poolStrategy is the effective switch strategy of pool key drawing on refs,
+// and whether the auto classifier chose it. Manual when any subscription it
+// draws on is manual — pins are an explicit order. Otherwise the most
+// aggressive wins, since a flapping source drags the whole pool's pick with
+// it: agile when any is set agile; else the classifier's call when any is on
+// auto (or the pool draws on no subscription — entries carry no strategy of
+// their own); else stable.
+func (s *Supervisor) poolStrategy(key string, refs []xray.DialerRef) (string, bool) {
+	auto, agile, subs := false, false, 0
+	for _, r := range refs {
+		if r.Kind != xray.RefXraySub {
+			continue
+		}
+		subs++
+		sub, err := s.store.GetSubscriptionByName(r.Name)
+		if err != nil {
+			continue
+		}
+		switch sub.EffectiveStrategy() {
+		case xray.StrategyManual:
+			return xray.StrategyManual, false
+		case xray.StrategyAgile:
+			agile = true
+		case xray.StrategyAuto:
+			auto = true
+		}
+	}
+	if agile {
+		return xray.StrategyAgile, false
+	}
+	if !auto && subs > 0 {
+		return xray.StrategyStable, false
+	}
+	if s.auto.agile(key) {
+		return xray.StrategyAgile, true
+	}
+	return xray.StrategyStable, true
+}
+
+// poolPins returns the member keys pinned by the manual subscriptions among
+// refs, in pin order, that are present in members.
+func (s *Supervisor) poolPins(refs []xray.DialerRef, members []xray.SlotMember) []string {
+	present := make(map[string]bool, len(members))
+	for _, m := range members {
+		present[m.Key] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range refs {
+		if r.Kind != xray.RefXraySub {
+			continue
+		}
+		sub, err := s.store.GetSubscriptionByName(r.Name)
+		if err != nil || sub.EffectiveStrategy() != xray.StrategyManual {
+			continue
+		}
+		fps, err := s.store.PinnedFingerprints(sub.ID)
+		if err != nil {
+			continue
+		}
+		for _, fp := range fps {
+			if present[fp] && !seen[fp] {
+				seen[fp] = true
+				out = append(out, fp)
+			}
+		}
+	}
+	return out
+}
+
+// logStrategyChanges logs pools whose strategy differs from the loaded one.
+// Caller holds s.mu.
+func (s *Supervisor) logStrategyChanges(slots []xray.Slot) {
+	was := map[string]string{}
+	for _, sl := range s.loadedSlots {
+		was[sl.Key] = sl.Strategy
+	}
+	for _, sl := range slots {
+		if old, ok := was[sl.Key]; ok && old != sl.Strategy && !sl.Auto { // auto logs its own
+			s.log.Printf("pool %s (%s): strategy %s → %s", sl.Master, sl.Key, orStable(old), orStable(sl.Strategy))
+		}
+	}
+}
+
+func orStable(s string) string {
+	if s == "" {
+		return xray.StrategyStable
+	}
+	return s
 }
 
 // assignSlotIndices gives every pool a slot index, keeping the one it had on

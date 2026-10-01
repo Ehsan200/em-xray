@@ -91,6 +91,25 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 		outbounds = append(outbounds, ob)
 		haveOut[tag] = true
 	}
+	// One interface-bound freedom outbound per interface an enabled inbound
+	// targets: xray binds its sockets to the device (SO_BINDTODEVICE on
+	// Linux), so the traffic leaves by that interface, not the default route.
+	for _, in := range ins {
+		if !in.Enabled {
+			continue
+		}
+		if kind, name, err := ParseTarget(in.Target); err == nil && kind == KindIface {
+			tag := IfaceTag(name)
+			if haveOut[tag] {
+				continue
+			}
+			outbounds = append(outbounds, map[string]any{
+				"tag": tag, "protocol": "freedom",
+				"streamSettings": map[string]any{"sockopt": map[string]any{"interface": name}},
+			})
+			haveOut[tag] = true
+		}
+	}
 
 	inboundsJSON := []any{}
 	var rules []any
@@ -234,6 +253,8 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			// poll. The spare — ranked next, probed, but carrying nothing —
 			// is the fallback, so losing both active members lands on a
 			// member that was answering rather than on one that just died.
+			// An agile pool's active set is every member alive in the latest
+			// round (up to a cap), so Active says how many there are.
 			var picked []string
 			for _, k := range s.Picked {
 				if loaded[k] {
@@ -241,7 +262,11 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 				}
 			}
 			if len(picked) > 0 {
-				active := min(SlotBalancerExpected, len(picked))
+				active := s.Active
+				if active <= 0 {
+					active = SlotBalancerExpected
+				}
+				active = min(active, len(picked))
 				selector = nil
 				for _, t := range picked[:active] {
 					selector = append(selector, t)
@@ -307,6 +332,9 @@ func setDialerProxy(outbound map[string]any, dialerTag string) {
 	sockopt["dialerProxy"] = dialerTag
 }
 
+// IfaceTag is the tag of the freedom outbound bound to network interface name.
+func IfaceTag(name string) string { return "iface-" + sanitizeKey(name) }
+
 // outboundTagFor maps an inbound Target to the outbound tag its traffic exits by.
 func outboundTagFor(target string) (string, error) {
 	kind, name, err := ParseTarget(target)
@@ -320,6 +348,8 @@ func outboundTagFor(target string) (string, error) {
 		// Both route to the entry's outbound tag; a master's outbound additionally
 		// carries the dialerProxy sockopt (added in P5).
 		return "out-" + sanitizeKey(name), nil
+	case KindIface:
+		return IfaceTag(name), nil
 	default:
 		return "", fmt.Errorf("unhandled target kind %q", kind)
 	}

@@ -1,6 +1,8 @@
 package xray
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"gorm.io/gorm/clause"
@@ -105,4 +107,66 @@ func (s *Store) TrafficDays() int {
 		}
 	}
 	return DefaultTrafficDays
+}
+
+// SettingAutoTuning holds the auto strategy's thresholds (JSON AutoTuning).
+const SettingAutoTuning = "auto_strategy"
+
+// AutoTuning are the thresholds the daemon's auto strategy uses to tell a
+// pool whose nodes come and go in waves (switch it to agile) from a calm one
+// (back to stable). Judged over the last WindowMin minutes of pool health: a
+// pool is flapping when its whole pick died at once PickLoss times, or when
+// FlappingPct percent of its nodes (and at least two) flipped alive↔dead
+// Flips times or more. An agile pool goes back to stable after CalmMin
+// minutes without flapping — slow on purpose, so a pool doesn't bounce.
+type AutoTuning struct {
+	WindowMin   int `json:"window_min"`
+	Flips       int `json:"flips"`
+	FlappingPct int `json:"flapping_pct"`
+	PickLoss    int `json:"pick_loss"` // 0 = don't judge by pick losses
+	CalmMin     int `json:"calm_min"`
+}
+
+// DefaultAutoTuning is the auto strategy's out-of-the-box thresholds.
+var DefaultAutoTuning = AutoTuning{WindowMin: 10, Flips: 2, FlappingPct: 30, PickLoss: 2, CalmMin: 30}
+
+// MaxAutoWindowMin is the longest judging window: the pool health history
+// the daemon keeps.
+const MaxAutoWindowMin = 30
+
+// Validate reports a threshold out of range.
+func (t AutoTuning) Validate() error {
+	switch {
+	case t.WindowMin < 2 || t.WindowMin > MaxAutoWindowMin:
+		return fmt.Errorf("window must be 2-%d minutes", MaxAutoWindowMin)
+	case t.Flips < 1 || t.Flips > 100:
+		return fmt.Errorf("flips must be 1-100")
+	case t.FlappingPct < 1 || t.FlappingPct > 100:
+		return fmt.Errorf("flapping share must be 1-100%%")
+	case t.PickLoss < 0 || t.PickLoss > 100:
+		return fmt.Errorf("pick losses must be 0-100")
+	case t.CalmMin < 1 || t.CalmMin > 24*60:
+		return fmt.Errorf("calm time must be 1-1440 minutes")
+	}
+	return nil
+}
+
+// AutoTuning returns the stored thresholds, or the defaults when unset/bad.
+func (s *Store) AutoTuning() AutoTuning {
+	if v, ok := s.GetSetting(SettingAutoTuning); ok {
+		var t AutoTuning
+		if json.Unmarshal([]byte(v), &t) == nil && t.Validate() == nil {
+			return t
+		}
+	}
+	return DefaultAutoTuning
+}
+
+// SetAutoTuning validates and stores the thresholds.
+func (s *Store) SetAutoTuning(t AutoTuning) error {
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(t)
+	return s.SetSetting(SettingAutoTuning, string(b))
 }

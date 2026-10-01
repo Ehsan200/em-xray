@@ -138,6 +138,9 @@ func (p *nodeParker) observe(slots []xray.Slot, byTag map[string]nodeStatus) []p
 	}
 
 	for _, sl := range slots {
+		if sl.NeverParks() {
+			continue // agile: nodes come back in waves; manual: user's choice
+		}
 		status := make(map[string]nodeStatus, len(sl.Members))
 		aliveCount := 0
 		for _, m := range sl.Members {
@@ -218,6 +221,25 @@ func (p *nodeParker) release() []parkEvent {
 	return events
 }
 
+// unpark returns keys to their pools at once and forgets their history.
+func (p *nodeParker) unpark(keys []string) (released []string) {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	for _, k := range keys {
+		if st, ok := p.nodes[k]; ok {
+			if now.Before(st.parkedUntil) {
+				released = append(released, k)
+			}
+			delete(p.nodes, k)
+		}
+	}
+	return released
+}
+
 // withoutParked drops parked members from a resolved member list, unless that
 // would leave it empty.
 func withoutParked(members []xray.SlotMember, parked map[string]time.Time) []xray.SlotMember {
@@ -268,8 +290,10 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 	}
 	var events []parkEvent
 	repick := false
+	var byTag map[string]nodeStatus
 	if len(slots) > 0 {
-		byTag, err := fetchObservatory(ctx, "127.0.0.1:"+strconv.Itoa(xray.MetricsPort))
+		var err error
+		byTag, err = fetchObservatory(ctx, "127.0.0.1:"+strconv.Itoa(xray.MetricsPort))
 		if err != nil {
 			return // metrics not up yet (first seconds after a start)
 		}
@@ -277,8 +301,15 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 		if s.picker.observe(slots, byTag) {
 			repick = s.repicked(slots)
 		}
+		s.history.record(slots, byTag, s.parker.parked())
+		if s.autoSwitched(slots) {
+			repick = true
+		}
 	}
 	events = append(events, s.parker.release()...)
+	// After the reconcile below moves the pick off them, so the reconnects
+	// land on live members.
+	defer s.cutDeadMembers(ctx, slots, byTag)
 	if len(events) == 0 && !repick {
 		return
 	}
@@ -300,8 +331,8 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 func (s *Supervisor) repicked(slots []xray.Slot) bool {
 	changed := false
 	for _, sl := range slots {
-		now := s.picker.pick(sl.Index, sl.Members, sl.Picked)
-		if samePick(now, sl.Picked) {
+		now, active := s.picker.pickFor(sl, sl)
+		if samePick(now, sl.Picked) && active == sl.ActiveCount() {
 			continue
 		}
 		changed = true

@@ -73,10 +73,18 @@ func (s *Server) SubSetOptions(ctx context.Context, req *emxv1.SubOptionsRequest
 	sub.IntervalSec = int(req.IntervalSec)
 	sub.NodeCap = int(req.NodeCap)
 	sub.UserAgent = req.UserAgent
+	if req.Strategy != "" {
+		st, err := xray.ParseStrategy(req.Strategy)
+		if err != nil {
+			return nil, err
+		}
+		sub.Strategy = st
+	}
 	if err := s.store.UpdateSubscription(sub); err != nil {
 		return nil, err
 	}
-	// A smaller cap can change which nodes are active → live-sync the pool.
+	// A smaller cap can change which nodes are active, a strategy how the
+	// pool picks → live-sync the pool.
 	s.sup.SyncDialerMembers()
 	return &emxv1.SubReply{Sub: s.subInfo(*sub)}, nil
 }
@@ -90,6 +98,14 @@ func (s *Server) SubNodes(ctx context.Context, req *emxv1.IdRequest) (*emxv1.Sub
 	if err != nil {
 		return nil, err
 	}
+	pins, err := s.store.PinnedFingerprints(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	pinned := make(map[string]bool, len(pins))
+	for _, fp := range pins {
+		pinned[fp] = true
+	}
 	parked := s.sup.ParkedNodes()
 	rejected := s.sup.RejectedMembers()
 	var out []*emxv1.NodeInfo
@@ -97,6 +113,7 @@ func (s *Server) SubNodes(ctx context.Context, req *emxv1.IdRequest) (*emxv1.Sub
 		info := &emxv1.NodeInfo{
 			Fingerprint: n.Fingerprint, Name: n.Name, Active: n.Active,
 			Disabled: disabled[n.Fingerprint], LatencyMs: int32(n.LastLatencyMs),
+			Pinned: pinned[n.Fingerprint],
 		}
 		if until, ok := parked[n.Fingerprint]; ok {
 			info.ParkedUntil = until.Unix()
@@ -112,6 +129,22 @@ func (s *Server) SubSetNodeDisabled(ctx context.Context, req *emxv1.SubNodeDisab
 		return nil, err
 	}
 	s.sup.SyncDialerMembers() // the (de)activated node enters/leaves the pool live
+	return &emxv1.Empty{}, nil
+}
+
+// SubSetNodePinned pins or unpins a node; a manual pool applies it live and
+// closes the connections on nodes it no longer routes through.
+func (s *Server) SubSetNodePinned(ctx context.Context, req *emxv1.SubNodePinnedRequest) (*emxv1.Empty, error) {
+	var err error
+	if req.ClearAll {
+		err = s.store.ClearPins(uint(req.SubId))
+	} else {
+		err = s.store.SetNodePinned(uint(req.SubId), req.Fingerprint, req.Pinned)
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.sup.SyncDialerMembers()
 	return &emxv1.Empty{}, nil
 }
 
@@ -141,5 +174,6 @@ func (s *Server) subInfo(sub xray.Subscription) *emxv1.SubInfo {
 		Upload: sub.Upload, Download: sub.Download, Total: sub.Total, Expire: sub.Expire,
 		LastFetched: lastFetched, UserAgent: sub.UserAgent,
 		IntervalSec: int32(sub.IntervalSec), NodeCap: int32(sub.NodeCap),
+		Strategy: sub.EffectiveStrategy(),
 	}
 }

@@ -21,8 +21,67 @@ func inboundCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "in") },
 	}
 	c.AddCommand(inboundAddCmd(), inboundListCmd(), inboundRemoveCmd(),
-		inboundDuplicateCmd(), inboundEditCmd(), inboundQRCmd(), inboundUserCmd())
+		inboundDuplicateCmd(), inboundEditCmd(), inboundQRCmd(), inboundUserCmd(),
+		inboundTargetCmd(), interfacesCmd())
 	return c
+}
+
+// inboundTargetCmd points an inbound at a new egress, live.
+func inboundTargetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "target <id> <master:NAME|xray:NAME|iface:NAME|direct>",
+		Short:   "change where an inbound's traffic egresses (applies live)",
+		Aliases: []string{"set-target", "retarget"},
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.InboundSetTarget(ctx, &emxv1.InboundTargetRequest{Id: id, Target: args[1]})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s → %s\n", reply.Inbound.Name, reply.Inbound.Target)
+				return nil
+			})
+		},
+	}
+}
+
+// interfacesCmd lists the server's network interfaces (iface:NAME targets).
+func interfacesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "interfaces",
+		Short:   "list this server's network interfaces (for --to iface:NAME)",
+		Aliases: []string{"ifaces", "if"},
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				reply, err := cl.Interfaces(ctx, &emxv1.Empty{})
+				if err != nil {
+					return err
+				}
+				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "INTERFACE\tSTATE\tADDRESSES")
+				for _, ifc := range reply.Interfaces {
+					fmt.Fprintf(tw, "%s\t%s\t%s\n", ifc.Name, ifaceState(ifc), strings.Join(ifc.Addrs, " "))
+				}
+				return tw.Flush()
+			})
+		},
+	}
+}
+
+func ifaceState(ifc *emxv1.NetInterface) string {
+	switch {
+	case ifc.Loopback:
+		return "loopback"
+	case ifc.Up:
+		return "up"
+	}
+	return "down"
 }
 
 func inboundDuplicateCmd() *cobra.Command {
@@ -114,7 +173,7 @@ func inboundAddCmd() *cobra.Command {
 					return fmt.Errorf("name is required")
 				}
 				template = ask(in, out, "template", firstNonEmpty(template, "vless-reality"))
-				target = ask(in, out, "target (master:NAME | xray:NAME | direct)", firstNonEmpty(target, "direct"))
+				target = ask(in, out, "target (master:NAME | xray:NAME | iface:NAME | direct)", firstNonEmpty(target, "direct"))
 				host = ask(in, out, "public host/IP for the client link (optional)", host)
 			}
 			if target == "" {
@@ -149,7 +208,7 @@ func inboundAddCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVarP(&template, "template", "t", "", "template name (default vless-reality; see: emx template ls)")
-	c.Flags().StringVar(&target, "to", "", "egress target: master:NAME | xray:NAME | direct")
+	c.Flags().StringVar(&target, "to", "", "egress target: master:NAME | xray:NAME | iface:NAME (a network interface, see `emx in interfaces`) | direct")
 	c.Flags().StringVar(&host, "host", "", "public host/IP clients dial (for the share link)")
 	c.Flags().StringVar(&domain, "domain", "", "public domain for Caddy and the client link")
 	c.Flags().IntVar(&port, "port", 0, "listen port (0 = auto-assign)")

@@ -23,7 +23,8 @@ func subCmd() *cobra.Command {
 		subEnableCmd(true), subEnableCmd(false),
 		subRefreshCmd(), subNodesCmd(),
 		subNodeDisableCmd(true), subNodeDisableCmd(false),
-		subRenameCmd(), subInfoCmd(), subSetCmd(), subTestCmd(),
+		subRenameCmd(), subInfoCmd(), subSetCmd(), subTestCmd(), subHealthCmd(),
+		subPinCmd(true), subPinCmd(false),
 	)
 	return c
 }
@@ -32,9 +33,9 @@ func subCmd() *cobra.Command {
 // Unspecified flags keep their current value.
 func subSetCmd() *cobra.Command {
 	var interval, cap int
-	var ua string
+	var ua, strategy string
 	c := &cobra.Command{
-		Use: "set <id>", Short: "change a subscription's refresh interval / cap / user-agent",
+		Use: "set <id>", Short: "change a subscription's refresh interval / cap / user-agent / switch strategy",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0])
@@ -42,8 +43,8 @@ func subSetCmd() *cobra.Command {
 				return err
 			}
 			f := cmd.Flags()
-			if !f.Changed("interval") && !f.Changed("cap") && !f.Changed("ua") {
-				return fmt.Errorf("nothing to change: pass --interval, --cap and/or --ua")
+			if !f.Changed("interval") && !f.Changed("cap") && !f.Changed("ua") && !f.Changed("strategy") {
+				return fmt.Errorf("nothing to change: pass --interval, --cap, --ua and/or --strategy")
 			}
 			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
 				// Start from current values so unspecified flags are preserved.
@@ -73,6 +74,9 @@ func subSetCmd() *cobra.Command {
 				if f.Changed("ua") {
 					req.UserAgent = ua
 				}
+				if f.Changed("strategy") {
+					req.Strategy = strategy
+				}
 				reply, err := cl.SubSetOptions(ctx, req)
 				if err != nil {
 					return err
@@ -85,6 +89,7 @@ func subSetCmd() *cobra.Command {
 	c.Flags().IntVar(&interval, "interval", 0, "refresh interval seconds (0 = 12h default)")
 	c.Flags().IntVar(&cap, "cap", 0, "max active nodes (0 = 30 default)")
 	c.Flags().StringVar(&ua, "ua", "", "User-Agent ('' = v2rayN default)")
+	c.Flags().StringVar(&strategy, "strategy", "", "how pools switch nodes: auto, stable (sticky, parks dead nodes), agile (follows nodes that come and go in waves) or manual (only pinned nodes)")
 	return c
 }
 
@@ -277,7 +282,7 @@ func subNodesCmd() *cobra.Command {
 					return err
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "FINGERPRINT\tNAME\tACTIVE\tDISABLED\tLATENCY\tSTATE")
+				fmt.Fprintln(tw, "FINGERPRINT\tNAME\tACTIVE\tDISABLED\tPINNED\tLATENCY\tSTATE")
 				for _, n := range reply.Nodes {
 					lat := "-"
 					if n.LatencyMs > 0 {
@@ -287,7 +292,7 @@ func subNodesCmd() *cobra.Command {
 					if n.Rejected != "" {
 						state = "REFUSED by xray"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%v\t%v\t%s\t%s\n", n.Fingerprint, n.Name, n.Active, n.Disabled, lat, state)
+					fmt.Fprintf(tw, "%s\t%s\t%v\t%v\t%v\t%s\t%s\n", n.Fingerprint, n.Name, n.Active, n.Disabled, n.Pinned, lat, state)
 				}
 				if err := tw.Flush(); err != nil {
 					return err
@@ -295,6 +300,54 @@ func subNodesCmd() *cobra.Command {
 				for _, n := range reply.Nodes {
 					if n.Rejected != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "\n%s (%s) refused by xray:\n  %s\n", n.Name, n.Fingerprint, n.Rejected)
+					}
+				}
+				return nil
+			})
+		},
+	}
+}
+
+// subPinCmd pins nodes for the manual strategy, or unpins them (all when no
+// fingerprint is given).
+func subPinCmd(pin bool) *cobra.Command {
+	use, short := "pin <subid> <fingerprint>...", "pin nodes: a manual-strategy pool routes only through them"
+	args := cobra.MinimumNArgs(2)
+	if !pin {
+		use, short, args = "unpin <subid> [fingerprint...]", "unpin nodes (all of them when none is given)", cobra.MinimumNArgs(1)
+	}
+	return &cobra.Command{
+		Use: use, Short: short, Args: args,
+		RunE: func(cmd *cobra.Command, a []string) error {
+			id, err := parseID(a[0])
+			if err != nil {
+				return err
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				if !pin && len(a) == 1 {
+					if _, err := cl.SubSetNodePinned(ctx, &emxv1.SubNodePinnedRequest{SubId: id, ClearAll: true}); err != nil {
+						return err
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "all nodes unpinned")
+					return nil
+				}
+				for _, fp := range a[1:] {
+					if _, err := cl.SubSetNodePinned(ctx, &emxv1.SubNodePinnedRequest{SubId: id, Fingerprint: fp, Pinned: pin}); err != nil {
+						return err
+					}
+				}
+				if !pin {
+					fmt.Fprintf(cmd.OutOrStdout(), "unpinned %d node(s)\n", len(a)-1)
+					return nil
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "pinned %d node(s)\n", len(a)-1)
+				list, err := cl.SubList(ctx, &emxv1.Empty{})
+				if err != nil {
+					return err
+				}
+				for _, s := range list.Subs {
+					if s.Id == id && s.Strategy != "manual" {
+						fmt.Fprintf(cmd.OutOrStdout(), "strategy is %s — `emx sub set %d --strategy manual` to route only through pinned nodes\n", s.Strategy, id)
 					}
 				}
 				return nil

@@ -58,6 +58,8 @@ func rootCmd() *cobra.Command {
 		inboundCmd(),
 		subCmd(),
 		winnerCmd(),
+		healthCmd(),
+		autoStrategyCmd(),
 		trafficCmd(),
 		speedCmd(),
 		configCmd(),

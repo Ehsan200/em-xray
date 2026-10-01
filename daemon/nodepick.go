@@ -18,6 +18,7 @@ import (
 
 const (
 	nodePickCount    = 3
+	agileActiveMax   = 4    // an agile pool spreads over at most this many live members
 	nodeScoreAlpha   = 0.15 // EWMA weight per poll
 	nodeHealthyRatio = 0.8
 	nodeStickyRatio  = 1.25
@@ -34,10 +35,13 @@ const (
 type nodeScore struct {
 	ok      float64 // EWMA success ratio
 	rttMs   float64 // EWMA latency
+	lastRTT float64 // latest round's latency (agile ranks by it)
 	hasRTT  bool
 	alive   bool // latest window has a success
 	clean   bool // latest window has no failure
 	sampled bool
+	// wentDown: alive in the previous poll, dead in this one.
+	wentDown bool
 }
 
 // nodePicker keeps scores by member tag. Nil-safe.
@@ -73,6 +77,9 @@ func (p *nodePicker) observe(slots []xray.Slot, byTag map[string]nodeStatus) boo
 			delete(p.scores, tag)
 		}
 	}
+	for _, sc := range p.scores {
+		sc.wentDown = false
+	}
 	if anySampled && !anyAlive {
 		return false
 	}
@@ -92,7 +99,9 @@ func (p *nodePicker) observe(slots []xray.Slot, byTag map[string]nodeStatus) boo
 		} else {
 			sc.ok += nodeScoreAlpha * (ratio - sc.ok)
 		}
+		sc.wentDown = sc.sampled && sc.alive && !st.Alive
 		if st.Alive && st.Delay > 0 {
+			sc.lastRTT = float64(st.Delay)
 			if !sc.hasRTT {
 				sc.rttMs, sc.hasRTT = float64(st.Delay), true
 			} else {
@@ -135,6 +144,10 @@ func (p *nodePicker) pick(idx int, members []xray.SlotMember, incumbent []string
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.pickStableLocked(idx, members, incumbent)
+}
+
+func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumbent []string) []string {
 	inc, wasActive := map[string]bool{}, map[string]bool{}
 	for i, k := range incumbent {
 		inc[k] = true
@@ -228,15 +241,131 @@ func (p *nodePicker) pick(idx int, members []xray.SlotMember, incumbent []string
 	return out
 }
 
-// pickSlots sets each slot's Picked, prev's picks of the same pool as incumbents.
+// pickAgile is the agile pool's pick: every member alive in the latest round,
+// fastest first by that round's RTT, up to agileActiveMax, then the spare —
+// the next live member, else the one with the best recent record. No
+// smoothing: a pool whose nodes come and go in waves has to follow the wave.
+// Members already active keep their place unless clearly beaten, so RTT noise
+// alone doesn't rewrite routing every poll. With nothing alive it falls back
+// to the stable ranking. Returns the keys and how many of them are active.
+func (p *nodePicker) pickAgile(idx int, members []xray.SlotMember, incumbent []string, incActive int) ([]string, int) {
+	if p == nil || len(members) == 0 {
+		return nil, 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	wasActive := map[string]bool{}
+	for i, k := range incumbent {
+		if i < incActive {
+			wasActive[k] = true
+		}
+	}
+	type cand struct {
+		key  string
+		sc   *nodeScore
+		cost float64
+	}
+	var alive, rest []cand
+	scored := false
+	for _, m := range members {
+		sc := p.scores[xray.SlotMemberTag(idx, m.Key)]
+		if sc == nil || !sc.sampled {
+			rest = append(rest, cand{key: m.Key, sc: sc})
+			continue
+		}
+		scored = true
+		if !sc.alive {
+			rest = append(rest, cand{key: m.Key, sc: sc})
+			continue
+		}
+		c := cand{key: m.Key, sc: sc, cost: sc.lastRTT}
+		if c.cost == 0 {
+			c.cost = sc.rttMs
+		}
+		if wasActive[m.Key] {
+			c.cost = c.cost/nodeStickyRatio - nodeStickyMs
+		}
+		alive = append(alive, c)
+	}
+	if !scored {
+		return nil, 0
+	}
+	if len(alive) == 0 {
+		keys := p.pickStableLocked(idx, members, incumbent)
+		return keys, min(xray.SlotBalancerExpected, len(keys))
+	}
+	sort.SliceStable(alive, func(i, j int) bool {
+		if alive[i].cost != alive[j].cost {
+			return alive[i].cost < alive[j].cost
+		}
+		return alive[i].key < alive[j].key
+	})
+	n := min(len(alive), agileActiveMax)
+	out := make([]string, 0, n+1)
+	for _, c := range alive[:n] {
+		out = append(out, c.key)
+	}
+	sort.Strings(out)
+	switch {
+	case len(alive) > n:
+		out = append(out, alive[n].key)
+	case len(rest) > 0:
+		sort.SliceStable(rest, func(i, j int) bool {
+			a, b := rest[i].sc, rest[j].sc
+			if (a == nil) != (b == nil) {
+				return b == nil
+			}
+			if a != nil && a.ok != b.ok {
+				return a.ok > b.ok
+			}
+			return rest[i].key < rest[j].key
+		})
+		out = append(out, rest[0].key)
+	}
+	return out, n
+}
+
+// pickFor ranks one slot by its strategy, prev being the same pool's last
+// pick (its incumbents). Returns the keys and the active count.
+func (p *nodePicker) pickFor(sl xray.Slot, prev xray.Slot) ([]string, int) {
+	if sl.Manual() {
+		// The pins are the pick, all active; with no spare the balancer's
+		// fallback is the first pin, so traffic never leaves them.
+		return append([]string(nil), sl.Pinned...), len(sl.Pinned)
+	}
+	if sl.Agile() {
+		return p.pickAgile(sl.Index, sl.Members, prev.Picked, prev.ActiveCount())
+	}
+	keys := p.pick(sl.Index, sl.Members, prev.Picked)
+	return keys, min(xray.SlotBalancerExpected, len(keys))
+}
+
+// pickSlots sets each slot's pick, prev's picks of the same pool as incumbents.
 func (p *nodePicker) pickSlots(slots, prev []xray.Slot) {
-	was := map[string][]string{}
+	was := map[string]xray.Slot{}
 	for _, sl := range prev {
-		was[sl.Key] = sl.Picked
+		was[sl.Key] = sl
 	}
 	for i := range slots {
-		slots[i].Picked = p.pick(slots[i].Index, slots[i].Members, was[slots[i].Key])
+		slots[i].Picked, slots[i].Active = p.pickFor(slots[i], was[slots[i].Key])
 	}
+}
+
+// wentDown returns the member keys of slot sl that were alive at the previous
+// poll and are dead now.
+func (p *nodePicker) wentDown(sl xray.Slot) []string {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for _, m := range sl.Members {
+		if sc := p.scores[xray.SlotMemberTag(sl.Index, m.Key)]; sc != nil && sc.wentDown {
+			out = append(out, m.Key)
+		}
+	}
+	return out
 }
 
 func samePick(a, b []string) bool {

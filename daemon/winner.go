@@ -51,7 +51,7 @@ func (s *Supervisor) Winners() ([]Winner, error) {
 		for _, m := range sl.Members {
 			names[xray.SlotMemberTag(sl.Index, m.Key)] = s.memberName(m.Key)
 		}
-		// A ranked pool's balancer is `random` over the daemon's active pair,
+		// A ranked pool's balancer is `random` over the daemon's active set,
 		// and xray lists that whole selector — dead members too, which it
 		// skips when routing. Show what it routes to: the live ones, or the
 		// spare (its fallback) once none is live.
@@ -70,8 +70,8 @@ func (s *Supervisor) Winners() ([]Winner, error) {
 			}
 			tags = append(tags, tag)
 		}
-		if ranked && len(tags) == 0 && len(sl.Picked) > xray.SlotBalancerExpected {
-			if spare := xray.SlotMemberTag(sl.Index, sl.Picked[xray.SlotBalancerExpected]); names[spare] != "" {
+		if ranked && len(tags) == 0 && len(sl.Picked) > sl.ActiveCount() {
+			if spare := xray.SlotMemberTag(sl.Index, sl.Picked[sl.ActiveCount()]); names[spare] != "" {
 				tags = []string{spare}
 			}
 		}

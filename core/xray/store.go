@@ -181,13 +181,61 @@ func (s *Store) DisabledFingerprints(subID uint) (map[string]bool, error) {
 	return out, nil
 }
 
+// PinnedFingerprints returns a subscription's pinned node fingerprints, in
+// the order they were first overridden.
+func (s *Store) PinnedFingerprints(subID uint) ([]string, error) {
+	var overrides []SubNodeOverride
+	if err := s.db.Where("sub_id = ? AND pinned = ?", subID, true).Order("id").Find(&overrides).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, len(overrides))
+	for i, o := range overrides {
+		out[i] = o.Fingerprint
+	}
+	return out, nil
+}
+
+// SetNodePinned pins or unpins a node (durable, by fingerprint). Pinning
+// also enables it. Recomputes active flags: a pinned node is always loaded.
+func (s *Store) SetNodePinned(subID uint, fingerprint string, pinned bool) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		ov := SubNodeOverride{SubID: subID, Fingerprint: fingerprint, Pinned: pinned}
+		cols := []string{"pinned"}
+		if pinned {
+			cols = append(cols, "disabled")
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "sub_id"}, {Name: "fingerprint"}},
+			DoUpdates: clause.AssignmentColumns(cols),
+		}).Create(&ov).Error; err != nil {
+			return err
+		}
+		return recomputeActive(tx, subID)
+	})
+}
+
+// ClearPins unpins every node of a subscription.
+func (s *Store) ClearPins(subID uint) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&SubNodeOverride{}).Where("sub_id = ?", subID).Update("pinned", false).Error; err != nil {
+			return err
+		}
+		return recomputeActive(tx, subID)
+	})
+}
+
 // SetNodeDisabled upserts a durable override and recomputes active flags.
+// Disabling a node also unpins it.
 func (s *Store) SetNodeDisabled(subID uint, fingerprint string, disabled bool) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		ov := SubNodeOverride{SubID: subID, Fingerprint: fingerprint, Disabled: disabled}
+		cols := []string{"disabled"}
+		if disabled {
+			cols = append(cols, "pinned")
+		}
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "sub_id"}, {Name: "fingerprint"}},
-			DoUpdates: clause.AssignmentColumns([]string{"disabled"}),
+			DoUpdates: clause.AssignmentColumns(cols),
 		}).Create(&ov).Error; err != nil {
 			return err
 		}
@@ -196,8 +244,9 @@ func (s *Store) SetNodeDisabled(subID uint, fingerprint string, disabled bool) e
 }
 
 // recomputeActive derives each node's Active flag (never set directly):
-// active = sub enabled AND not overridden-off AND within the first EffectiveCap()
-// non-disabled nodes in insertion order. Overridden-off nodes do not consume cap.
+// active = sub enabled AND not overridden-off AND (pinned OR within the first
+// EffectiveCap() non-disabled, unpinned nodes in insertion order). Overridden-off
+// and pinned nodes do not consume cap.
 func recomputeActive(tx *gorm.DB, subID uint) error {
 	var sub Subscription
 	if err := tx.First(&sub, subID).Error; err != nil {
@@ -212,9 +261,13 @@ func recomputeActive(tx *gorm.DB, subID uint) error {
 		return err
 	}
 	off := make(map[string]bool, len(overrides))
+	pinned := make(map[string]bool, len(overrides))
 	for _, o := range overrides {
 		if o.Disabled {
 			off[o.Fingerprint] = true
+		}
+		if o.Pinned {
+			pinned[o.Fingerprint] = true
 		}
 	}
 
@@ -223,7 +276,9 @@ func recomputeActive(tx *gorm.DB, subID uint) error {
 	for i := range nodes {
 		want := false
 		if sub.Enabled && !off[nodes[i].Fingerprint] {
-			if kept < capN {
+			if pinned[nodes[i].Fingerprint] {
+				want = true
+			} else if kept < capN {
 				want = true
 				kept++
 			}
@@ -349,7 +404,7 @@ func renameInboundTargets(tx *gorm.DB, old, name string) error {
 	}
 	for _, in := range ins {
 		kind, n, err := ParseTarget(in.Target)
-		if err != nil || kind == TargetDirect || NormalizeName(n) != NormalizeName(old) {
+		if err != nil || (kind != KindMaster && kind != KindXray) || NormalizeName(n) != NormalizeName(old) {
 			continue
 		}
 		if err := tx.Model(&Inbound{}).Where("id = ?", in.ID).Update("target", kind+":"+name).Error; err != nil {

@@ -78,6 +78,7 @@ sudo emx in add gate --to master:mymaster       # 3. listener for your devices �
 
 sudo emx in qr 1                                # link as a QR code
 sudo emx winner                                 # nodes each master currently spreads over
+sudo emx health                                 # per-node health timeline of every pool
 sudo emx traffic                                # per-inbound/outbound charts
 sudo emx speed                                  # live ↑/↓ throughput
 ```
@@ -213,7 +214,16 @@ EMX_PROXY=tg EMX_PROXY_USER=alice EMX_PROXY_PASS=s3cret sudo -E emx update
 | **Node** | One pool member, ranked by the burst observatory's rolling pings. Never listens on a port. |
 | **Inbound** | A listener you expose, routed to a **Target**. |
 | **User** | An extra client on an inbound — own credential/link, own traffic, optional byte cap. |
-| **Target** | `master:NAME` (fastest node) · `xray:NAME` (one entry) · `direct` (this server's IP). |
+| **Target** | `master:NAME` (fastest node) · `xray:NAME` (one entry) · `iface:NAME` (out a chosen network interface) · `direct` (this server's IP). |
+
+`iface:NAME` sends an inbound's traffic straight out of one network interface of this server — a
+second uplink, a VPN tunnel such as `wg0` — instead of the default route: xray binds the sockets to
+that device (`SO_BINDTODEVICE` on Linux), so the exit IP is that interface's. Like `direct` it
+egresses from this box, just by another door. DNS lookups for domain targets still use the system
+resolver. `emx in interfaces` lists what this server has; the interface must exist when the target
+is set. Change any inbound's target live with `emx in target <id> <target>` or TUI → inbound →
+"Change target" (which also offers a network-interface picker); no restart, existing connections
+finish on the old path.
 
 Dialer refs, comma-separated: `xray:NAME`, `xraysub:NAME` (`proxy:NAME` not supported). A master may
 mix refs. Masters naming the same refs (in any order) share one slot — one balancer, one set of
@@ -232,7 +242,8 @@ emx version
 
 emx sub add <name> <url> | ls | rm <id> | rename <id> <name>
 emx sub info <name>                         metadata card: quota, expiry, last fetch
-emx sub set <id> [--interval S] [--cap N] [--ua UA]
+emx sub set <id> [--interval S] [--cap N] [--ua UA] [--strategy auto|stable|agile|manual]
+emx sub pin <id> <fingerprint>... | unpin <id> [fingerprint...]
 emx sub enable <id> | disable <id> | refresh [id]
 emx sub nodes <id>                          fingerprint, active, disabled, latency
 emx sub node-enable | node-disable <subid> <fingerprint>    durable across refreshes
@@ -255,6 +266,8 @@ emx warp add [name] [--inbound NAME [-t TEMPLATE]] [--license KEY] [--dialer REF
 emx in add [name] [-t TEMPLATE] [--to TARGET] [--host H] [--port N]
                   [--domain D] [--path P] [--email E] [--xhttp-mode MODE]
 emx in ls [--links] | rm <id> | qr <id> | duplicate <id> [name] | edit <id>
+emx in target <id> <master:NAME|xray:NAME|iface:NAME|direct>   change egress, live
+emx in interfaces                           network interfaces for iface: targets
 emx in user add <inbound-id> <name> [--cap 10GB]
 emx in user ls <inbound-id> | rm | enable | disable <user-id>
 emx in user qr <inbound-id> <user-name>
@@ -270,6 +283,9 @@ emx probe-interval [seconds]                observatory ping cadence (default 10
 
 emx caddy install | print | domains | apply | enable | disable | status
 emx template ls | winner | ui
+emx health [master|sub|entry] [--window 30m]
+emx sub health <name>                       per-node pool health timeline (last 30m)
+emx auto-strategy [--window 10m] [--flips N] [--flapping PCT] [--pick-loss N] [--calm 30m] [--defaults]
 ```
 
 Run any group without a subcommand on a terminal for its menu; on a pipe it prints help.
@@ -380,6 +396,46 @@ that legitimately use this server's IP. The burst observatory pings every member
 of 2 pings, 5s timeout) and a node that fails a whole round is skipped until it answers again —
 within ~20s of dying; `emx probe-interval` changes the cadence (5–3600s).
 
+`emx health` (TUI: main menu and each subscription → "Pool health") draws the last 30 minutes of
+every pool, one strip per node from oldest to now: alive, dead, both within one column (a flap),
+parked, not yet pinged, and rounds where nothing anywhere answered (this box's uplink, left out of
+the stats). Each node shows its uptime, alive↔dead flips and average RTT; each pool how often its
+whole pick (active pair + spare) was dead at once and for how long, and its churn (share of nodes
+that flipped). A stable pool shows long solid strips; a pool whose nodes come and go in waves shows
+many flips and pick losses. History is in memory and starts over with the daemon.
+
+**Switch strategy** (per subscription: `emx sub set <id> --strategy …`, TUI → "Switch strategy"):
+
+- `stable` — for pools whose nodes stay up or down for long stretches. The daemon ranks members
+  over time (smoothed success rate and latency), keeps a sticky active pair plus a spare, and parks
+  nodes that stay dead (below).
+- `agile` — for pools whose nodes come and go in waves a minute or so apart. No parking (a pool
+  turning agile gets its parked nodes back at once) and no smoothing: the balancer spreads over
+  every member alive in the latest round, fastest first, up to 4, with the next live one as spare.
+  When a member carrying traffic dies, the daemon closes its connections to that node's server
+  (Linux) so apps reconnect onto a live node within seconds instead of hanging until the idle
+  timeout. An endpoint a live node also uses (CDN-fronted nodes often share one) is left alone.
+- `manual` — routes only through the nodes you pin: `emx sub pin <id> <fingerprint>...`,
+  `emx sub unpin <id> [fingerprint...]` (all when none given), or TUI → nodes → Pin. Traffic
+  spreads over the pins and never leaves them (if every pin is dead it fails inside them rather than
+  switching); no parking. Pins are durable by fingerprint (they survive a refresh), a pinned node is
+  always loaded even past the node cap, pinning enables a disabled node and disabling unpins it.
+  Moving a pin applies live and closes the connections on the nodes no longer pinned (Linux), so
+  apps move within seconds. A manual subscription with no pinned node in its pool runs stable.
+- `auto` (default) — the daemon picks per pool from its health history. A pool starts stable and
+  goes agile as soon as it is seen flapping within the last 10 minutes: its whole pick (active nodes
+  + spare) died at once twice, or 30%+ of its nodes (at least two) flipped alive↔dead twice or more.
+  It goes back to stable only after 30 minutes without flapping, so a pool on the edge doesn't
+  bounce. Each switch is logged with its reason, and `emx health` shows it
+  (`auto → agile · …`, `agile since 12:03: 3/7 nodes flipped …`). The thresholds are tunable with
+  `emx auto-strategy` (`--window --flips --flapping --pick-loss --calm`, `--defaults` to reset);
+  they apply on the next poll. In memory: a daemon restart starts every auto pool stable again.
+
+A pool drawing on several subscriptions follows `manual` if any of them is manual (pins are an
+explicit order), else the most aggressive among them: `agile` if any is set agile, else the auto
+classifier's call if any is on auto, else `stable`. A pool of
+entries only (no subscription) is auto. Changing a strategy applies live.
+
 ### Health, testing, accounting
 
 - **xray checks every config before it is applied** (`xray run -test`). A pool node it refuses
@@ -391,7 +447,7 @@ within ~20s of dying; `emx probe-interval` changes the cadence (5–3600s).
 - **Watchdog** restarts a crashed xray with backoff. Separately the daemon calls xray's local stats
   API every 30s and force-restarts after three consecutive failures; `emx status` shows
   `health: responsive` and the health-restart count.
-- **Dead nodes are parked.** xray's metrics endpoint (loopback, from `11933`) exposes the burst
+- **Dead nodes are parked** (stable pools). xray's metrics endpoint (loopback, from `11933`) exposes the burst
   observatory's per-node pings; every 30s the daemon reads it, and a node whose every ping failed
   for 15 min is left out of its pool (a live outbound removal). It returns on trial after 30 min,
   doubling per failed trial up to 6h; one good ping clears its record. Never parked without a live

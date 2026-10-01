@@ -273,3 +273,66 @@ func tryRoundTrip(c net.Conn, msg string) error {
 	}
 	return nil
 }
+
+// startFreezableNode is a pool node: a TCP relay in front of a SOCKS5 server
+// that can be frozen — it keeps every connection open but stops moving bytes
+// and leaves new ones hanging, the way a node silently dropped upstream looks.
+func startFreezableNode(t *testing.T) (port int, freeze func(bool)) {
+	t.Helper()
+	backend, _ := startSocks5(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var frozen atomic.Bool
+	wait := func() {
+		for frozen.Load() {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	pipe := func(dst, src net.Conn) {
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := src.Read(buf)
+			wait()
+			if n > 0 {
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				wait()
+				up, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(backend))
+				if err != nil {
+					return
+				}
+				defer up.Close()
+				go pipe(up, c)
+				pipe(c, up)
+			}()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port, frozen.Store
+}
+
+func loadedSlot(sup *Supervisor) xray.Slot {
+	sup.mu.Lock()
+	defer sup.mu.Unlock()
+	if len(sup.loadedSlots) == 0 {
+		return xray.Slot{}
+	}
+	return sup.loadedSlots[0]
+}

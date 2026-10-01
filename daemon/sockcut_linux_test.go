@@ -3,8 +3,10 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"testing"
@@ -53,10 +55,10 @@ func waitClosed(t *testing.T, c net.Conn, what string, timeout time.Duration) {
 func TestCutLoopbackSockets(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		cut  func(want map[[4]byte]bool) (int, error)
+		cut  func(match sockMatch) (int, error)
 	}{
 		{"sock_destroy", destroySockets},
-		{"pidfd_getfd", func(want map[[4]byte]bool) (int, error) { return shutdownProcSockets(os.Getpid(), want) }},
+		{"pidfd_getfd", func(match sockMatch) (int, error) { return shutdownProcSockets(os.Getpid(), match) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			echo := startEcho(t)
@@ -65,7 +67,8 @@ func TestCutLoopbackSockets(t *testing.T) {
 			other := dialFrom(t, "127.77.1.3", echo)
 			roundTrip(t, cut, "before")
 
-			n, err := tc.cut(map[[4]byte]bool{{127, 77, 1, 2}: true})
+			addr := netip.AddrFrom4([4]byte{127, 77, 1, 2})
+			n, err := tc.cut(func(src, dst netip.AddrPort) bool { return src.Addr() == addr || dst.Addr() == addr })
 			skipUnlessCanCut(t, err)
 			if err != nil {
 				t.Fatal(err)
@@ -80,6 +83,26 @@ func TestCutLoopbackSockets(t *testing.T) {
 			roundTrip(t, other, "untouched other address")
 		})
 	}
+}
+
+// Cutting by remote endpoint closes only connections to that address AND
+// port: a second server on the same address stays up.
+func TestCutRemoteEndpoints(t *testing.T) {
+	echoA, echoB := startEcho(t), startEcho(t)
+	toA := dialFrom(t, "127.0.0.1", echoA)
+	toB := dialFrom(t, "127.0.0.1", echoB)
+	roundTrip(t, toA, "before")
+	ep := netip.MustParseAddrPort(echoA)
+	n, err := cutRemoteEndpoints(os.Getpid(), []netip.AddrPort{ep})
+	skipUnlessCanCut(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 1 {
+		t.Errorf("closed %d sockets", n)
+	}
+	waitClosed(t, toA, "connection to the dead endpoint", 2*time.Second)
+	roundTrip(t, toB, "same address, other port")
 }
 
 // The whole feature against the real xray: two masters share a pool, each
@@ -173,4 +196,188 @@ func TestDialerChangeCutsThatMastersConnections(t *testing.T) {
 		t.Fatal("m1's reconnect did not go through the new pool")
 	}
 	roundTrip(t, s2, "m2 at the end")
+}
+
+// An agile pool against the real xray: a stream rides node A; when A goes
+// silent the daemon sees it die, closes the stream so the client reconnects,
+// and the reconnect rides node B — no restart, no waiting for the idle timeout.
+func TestAgileCutsDeadMemberConnections(t *testing.T) {
+	needRealXray(t)
+	if os.Geteuid() != 0 {
+		t.Skip("closing xray's sockets needs root")
+	}
+	useFreeXrayPorts(t)
+	store, sup := newRealSupervisor(t)
+	sup.probeURL = "http://" + startHTTP204(t) + "/generate_204"
+	if err := store.SetSetting(xray.SettingProbeInterval, strconv.Itoa(xray.MinProbeIntervalSec)); err != nil {
+		t.Fatal(err)
+	}
+	echo := startEcho(t)
+	portA, freezeA := startFreezableNode(t)
+	portB, freezeB := startFreezableNode(t)
+
+	sub := &xray.Subscription{Name: "wild", URL: "http://127.0.0.1/unused", Enabled: true, Strategy: xray.StrategyAgile}
+	if err := store.CreateSubscription(sub); err != nil {
+		t.Fatal(err)
+	}
+	var sn []xray.SubNode
+	for _, p := range []int{portA, portB} {
+		ob := socksMember(p)
+		fp, _ := xray.Fingerprint([]byte(ob))
+		sn = append(sn, xray.SubNode{Name: "n" + strconv.Itoa(p), Fingerprint: fp, Outbound: ob})
+	}
+	if err := store.ReplaceNodes(sub.ID, sn); err != nil {
+		t.Fatal(err)
+	}
+	tagA, tagB := xray.SlotMemberTag(0, sn[0].Fingerprint), xray.SlotMemberTag(0, sn[1].Fingerprint)
+	masterSrv, _ := startSocks5(t)
+	if err := store.CreateEntry(&xray.XrayEntry{Name: "M", Enabled: true, Dialer: "xraysub:wild", Outbound: socksMember(masterSrv)}); err != nil {
+		t.Fatal(err)
+	}
+	gate := freePort(t)
+	if err := store.CreateInbound(&xray.Inbound{Name: "gate", Enabled: true, Protocol: "socks", Listen: "127.0.0.1", Port: gate, Target: "master:M"}); err != nil {
+		t.Fatal(err)
+	}
+
+	freezeB(true) // the stream must start on A
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	waitListening(t, gate)
+	if !waitRunning(sup, 10*time.Second) {
+		t.Fatal("xray did not start")
+	}
+	_, pid, _, _ := sup.XrayState()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for ctx.Err() == nil {
+			sup.PollNodeHealth(ctx)
+			time.Sleep(time.Second)
+		}
+	}()
+	waitObservatory(t, func(b map[string]nodeStatus) bool { return b[tagA].Alive && !b[tagB].Alive })
+	if sl := loadedSlot(sup); !sl.Agile() {
+		t.Fatalf("pool strategy = %q, want agile", sl.Strategy)
+	}
+
+	s := dialVia(t, gate, echo)
+	roundTrip(t, s, "on A")
+
+	freezeB(false)
+	deadline := time.Now().Add(40 * time.Second)
+	for loadedSlot(sup).ActiveCount() != 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("B never became active: %+v", loadedSlot(sup))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	roundTrip(t, s, "still on A")
+
+	freezeA(true)
+	frozeAt := time.Now()
+	waitEOF(t, s, "the stream on the node that went silent", 40*time.Second)
+	t.Logf("stream closed %s after A went silent", time.Since(frozeAt).Round(100*time.Millisecond))
+	roundTrip(t, dialVia(t, gate, echo), "reconnect through B")
+	if _, now, _, _ := sup.XrayState(); now != pid {
+		t.Fatalf("xray was restarted (pid %d → %d)", pid, now)
+	}
+}
+
+// waitEOF fails unless c is actually closed (EOF or reset) within timeout. A
+// stalled stream only times out its reads, which waitClosed can't tell apart.
+func waitEOF(t *testing.T, c net.Conn, what string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	buf := make([]byte, 64)
+	for {
+		_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, err := c.Read(buf)
+		var ne net.Error
+		if err != nil && !(errors.As(err, &ne) && ne.Timeout()) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: still open after %v", what, timeout)
+		}
+	}
+}
+
+// A manual pool against the real xray: a stream rides the pinned node; moving
+// the pin to the other node applies live and closes the stream at once, and
+// the reconnect rides the newly pinned node.
+func TestRepinCutsOldNodesConnections(t *testing.T) {
+	needRealXray(t)
+	if os.Geteuid() != 0 {
+		t.Skip("closing xray's sockets needs root")
+	}
+	useFreeXrayPorts(t)
+	store, sup := newRealSupervisor(t)
+	sup.probeURL = "http://" + startHTTP204(t) + "/generate_204"
+	echo := startEcho(t)
+	portA, servedA := startSocks5(t)
+	portB, servedB := startSocks5(t)
+	sub := &xray.Subscription{Name: "man", URL: "http://127.0.0.1/unused", Enabled: true, Strategy: xray.StrategyManual}
+	if err := store.CreateSubscription(sub); err != nil {
+		t.Fatal(err)
+	}
+	var sn []xray.SubNode
+	for _, p := range []int{portA, portB} {
+		ob := socksMember(p)
+		fp, _ := xray.Fingerprint([]byte(ob))
+		sn = append(sn, xray.SubNode{Name: "n" + strconv.Itoa(p), Fingerprint: fp, Outbound: ob})
+	}
+	if err := store.ReplaceNodes(sub.ID, sn); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodePinned(sub.ID, sn[0].Fingerprint, true); err != nil {
+		t.Fatal(err)
+	}
+	masterSrv, _ := startSocks5(t)
+	if err := store.CreateEntry(&xray.XrayEntry{Name: "M", Enabled: true, Dialer: "xraysub:man", Outbound: socksMember(masterSrv)}); err != nil {
+		t.Fatal(err)
+	}
+	gate := freePort(t)
+	if err := store.CreateInbound(&xray.Inbound{Name: "gate", Enabled: true, Protocol: "socks", Listen: "127.0.0.1", Port: gate, Target: "master:M"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	waitListening(t, gate)
+	if !waitRunning(sup, 10*time.Second) {
+		t.Fatal("xray did not start")
+	}
+	_, pid, _, _ := sup.XrayState()
+	if err := sup.waitAPIReady(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if sl := loadedSlot(sup); !sl.Manual() {
+		t.Fatalf("pool = %+v, want manual", sl)
+	}
+	beforeB := servedB()
+	s := dialVia(t, gate, echo)
+	roundTrip(t, s, "on A")
+	if servedA() == 0 || servedB() != beforeB {
+		t.Fatal("stream did not ride the pinned node A")
+	}
+
+	if err := store.SetNodePinned(sub.ID, sn[1].Fingerprint, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodePinned(sub.ID, sn[0].Fingerprint, false); err != nil {
+		t.Fatal(err)
+	}
+	repinned := time.Now()
+	sup.SyncDialerMembers()
+	waitEOF(t, s, "the stream on the unpinned node", 10*time.Second)
+	t.Logf("stream closed %s after the repin", time.Since(repinned).Round(100*time.Millisecond))
+	beforeB = servedB()
+	roundTrip(t, dialVia(t, gate, echo), "reconnect")
+	if servedB() <= beforeB {
+		t.Fatal("reconnect did not ride the newly pinned node B")
+	}
+	if _, now, _, _ := sup.XrayState(); now != pid {
+		t.Fatalf("xray was restarted (pid %d → %d)", pid, now)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"net"
 	"sort"
 	"strings"
 )
@@ -174,11 +175,39 @@ type Slot struct {
 	Key     string // DialerGroupKey of the refs the slot serves
 	Index   int
 	Members []SlotMember
-	// Picked is the daemon's ranking: the first SlotBalancerExpected keys are
-	// the balancer's selector, the next is its fallback (a hot spare). Empty =
+	// Picked is the daemon's ranking: the first ActiveCount() keys are the
+	// balancer's selector, the next is its fallback (a hot spare). Empty =
 	// not ranked yet, leastLoad over every member.
 	Picked []string
+	// Active is how many of Picked are active; 0 = SlotBalancerExpected.
+	Active int
+	// Strategy is the pool's effective switch strategy: StrategyStable or
+	// StrategyAgile ("" = stable).
+	Strategy string
+	// Auto: Strategy was chosen by the daemon's auto classifier, not set.
+	Auto bool
+	// Pinned are a manual pool's pinned member keys (present in Members).
+	Pinned []string
 }
+
+// ActiveCount is how many leading Picked keys the balancer spreads over.
+func (s Slot) ActiveCount() int {
+	n := s.Active
+	if n <= 0 {
+		n = SlotBalancerExpected
+	}
+	return min(n, len(s.Picked))
+}
+
+// Agile reports whether the pool runs the agile strategy.
+func (s Slot) Agile() bool { return s.Strategy == StrategyAgile }
+
+// Manual reports whether the pool routes only through pinned members.
+func (s Slot) Manual() bool { return s.Strategy == StrategyManual }
+
+// NeverParks reports whether the pool keeps every member loaded: agile pools
+// follow nodes that come back, manual ones route only where told.
+func (s Slot) NeverParks() bool { return s.Agile() || s.Manual() }
 
 // SlotMasters returns every master wired to the slot, owner first.
 func (s Slot) SlotMasters() []string {
@@ -328,4 +357,47 @@ func setStallTimeouts(ob map[string]any) {
 			so[k] = v
 		}
 	}
+}
+
+// OutboundEndpoint returns the server host and port a proxy outbound dials:
+// settings.vnext / settings.servers (first entry), the flat settings form,
+// or a wireguard peer's endpoint. ok is false when none is found.
+func OutboundEndpoint(outbound string) (host string, port int, ok bool) {
+	var ob struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if json.Unmarshal([]byte(outbound), &ob) != nil || ob.Settings == nil {
+		return "", 0, false
+	}
+	hostPort := func(m map[string]any) (string, int, bool) {
+		h, _ := m["address"].(string)
+		var p int
+		switch v := m["port"].(type) {
+		case float64:
+			p = int(v)
+		case string:
+			_, _ = fmt.Sscanf(v, "%d", &p)
+		}
+		return h, p, h != "" && p > 0
+	}
+	for _, list := range []string{"vnext", "servers"} {
+		if arr, _ := ob.Settings[list].([]any); len(arr) > 0 {
+			if m, _ := arr[0].(map[string]any); m != nil {
+				return hostPort(m)
+			}
+		}
+	}
+	if peers, _ := ob.Settings["peers"].([]any); len(peers) > 0 {
+		if m, _ := peers[0].(map[string]any); m != nil {
+			ep, _ := m["endpoint"].(string)
+			h, p, err := net.SplitHostPort(ep)
+			if err != nil {
+				return "", 0, false
+			}
+			var n int
+			_, _ = fmt.Sscanf(p, "%d", &n)
+			return h, n, h != "" && n > 0
+		}
+	}
+	return hostPort(ob.Settings)
 }

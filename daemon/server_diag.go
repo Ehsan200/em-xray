@@ -70,6 +70,28 @@ func (s *Server) ProbeInterval(ctx context.Context, req *emxv1.ProbeIntervalRequ
 	return &emxv1.ProbeIntervalReply{Sec: int32(s.store.ProbeIntervalSec())}, nil
 }
 
+// AutoStrategy reads (and, when req.Change, sets) the auto strategy's
+// thresholds. They take effect on the next health poll; no reconcile needed.
+func (s *Server) AutoStrategy(_ context.Context, req *emxv1.AutoStrategyRequest) (*emxv1.AutoStrategyReply, error) {
+	if req.Change {
+		if req.Set == nil {
+			return nil, fmt.Errorf("nothing to set")
+		}
+		if err := s.store.SetAutoTuning(autoTuningFromPB(req.Set)); err != nil {
+			return nil, err
+		}
+	}
+	return &emxv1.AutoStrategyReply{Tuning: autoTuningPB(s.store.AutoTuning()), Defaults: autoTuningPB(xray.DefaultAutoTuning)}, nil
+}
+
+func autoTuningPB(t xray.AutoTuning) *emxv1.AutoTuning {
+	return &emxv1.AutoTuning{WindowMin: int32(t.WindowMin), Flips: int32(t.Flips), FlappingPct: int32(t.FlappingPct), PickLoss: int32(t.PickLoss), CalmMin: int32(t.CalmMin)}
+}
+
+func autoTuningFromPB(t *emxv1.AutoTuning) xray.AutoTuning {
+	return xray.AutoTuning{WindowMin: int(t.WindowMin), Flips: int(t.Flips), FlappingPct: int(t.FlappingPct), PickLoss: int(t.PickLoss), CalmMin: int(t.CalmMin)}
+}
+
 // TrafficRetention reads (and, when req.Change, sets) how many days of hourly
 // traffic buckets are kept. Shrinking it prunes on the sampler's next tick.
 func (s *Server) TrafficRetention(ctx context.Context, req *emxv1.TrafficRetentionRequest) (*emxv1.TrafficRetentionReply, error) {

@@ -10,3 +10,5 @@ import "net/netip"
 const sockCutSupported = false
 
 func cutLoopbackSockets(int, []netip.Addr) (int, error) { return 0, nil }
+
+func cutRemoteEndpoints(int, []netip.AddrPort) (int, error) { return 0, nil }

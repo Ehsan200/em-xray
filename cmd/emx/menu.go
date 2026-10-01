@@ -71,13 +71,14 @@ func (s *menuSession) mainMenu() {
 			{"Subscriptions", "node pools for masters"},
 			{"Entries", "outbounds & masters"},
 			{"Traffic", "per-inbound/outbound usage + charts"},
+			{"Pool health", "per-node timeline: flaps, uptime, pick losses"},
 			{"Templates", "view built-in inbound presets"},
 			{"Caddy", "HTTPS frontend for XHTTP domains"},
 			{"Status", "daemon & xray health"},
 			{"Restart", "cycle xray or the whole daemon"},
 			{"Quit", ""},
 		})
-		if !ok || i == 8 {
+		if !ok || i == 9 {
 			return
 		}
 		switch i {
@@ -90,12 +91,14 @@ func (s *menuSession) mainMenu() {
 		case 3:
 			s.trafficView()
 		case 4:
-			s.templatesView()
+			s.healthView(nil)
 		case 5:
-			s.caddyMenu()
+			s.templatesView()
 		case 6:
-			s.statusView()
+			s.caddyMenu()
 		case 7:
+			s.statusView()
+		case 8:
 			if s.restartMenu() {
 				return // the daemon was restarted — this connection is dead
 			}
@@ -186,12 +189,13 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 			{"Show client link", ""},
 			{"Show QR code", ""},
 			{"Manage users", "extra clients + byte caps"},
+			{"Change target", "where its traffic egresses — now " + in.Target},
 			{"Duplicate", ""},
 			{"Edit JSON", ""},
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 6 {
+		if !ok || i == 7 {
 			return
 		}
 		switch i {
@@ -212,6 +216,8 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 		case 2:
 			s.usersMenu(in)
 		case 3:
+			s.inboundRetarget(in)
+		case 4:
 			name, _ := runInput("Name for the copy", in.Name+" copy")
 			ctx, cancel := call()
 			reply, err := s.c.InboundDuplicate(ctx, &emxv1.DuplicateRequest{Id: in.Id, NewName: name})
@@ -226,9 +232,9 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 					}
 				}
 			}
-		case 4:
-			s.editConfig("inbound", in.Id, isCaddyInboundInfo(in))
 		case 5:
+			s.editConfig("inbound", in.Id, isCaddyInboundInfo(in))
+		case 6:
 			if confirm("Remove inbound " + in.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.InboundRemove(ctx, &emxv1.IdRequest{Id: in.Id})
@@ -247,6 +253,23 @@ func (s *menuSession) inboundActions(in *emxv1.InboundInfo) {
 			}
 		}
 	}
+}
+
+// inboundRetarget changes where an inbound's traffic egresses.
+func (s *menuSession) inboundRetarget(in *emxv1.InboundInfo) {
+	target := s.pickTarget()
+	if target == "" || target == in.Target {
+		return
+	}
+	ctx, cancel := call()
+	reply, err := s.c.InboundSetTarget(ctx, &emxv1.InboundTargetRequest{Id: in.Id, Target: target})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	in.Target = reply.Inbound.Target
+	notify("%s now egresses via %s", in.Name, in.Target)
 }
 
 // pickInboundLink returns the link to show for an inbound. A public socks
@@ -505,11 +528,50 @@ func (s *menuSession) pickTarget() string {
 			}
 		}
 	}
+	items = append(items, selectItem{label: "Network interface…", desc: "leave by a chosen interface (second uplink, VPN tunnel)"})
 	i, ok := runSelect("Egress target", items)
 	if !ok {
 		return ""
 	}
+	if i == len(targets) {
+		return s.pickInterface()
+	}
 	return targets[i]
+}
+
+// pickInterface lets the user choose one of the server's network interfaces
+// and returns it as an iface:NAME target ("" on cancel).
+func (s *menuSession) pickInterface() string {
+	ctx, cancel := call()
+	reply, err := s.c.Interfaces(ctx, &emxv1.Empty{})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return ""
+	}
+	var items []selectItem
+	var names []string
+	for _, ifc := range reply.Interfaces {
+		if ifc.Loopback {
+			continue
+		}
+		desc := ifaceState(ifc)
+		if len(ifc.Addrs) > 0 {
+			desc += " · " + strings.Join(ifc.Addrs, " ")
+		}
+		items = append(items, selectItem{label: ifc.Name, desc: desc})
+		names = append(names, ifc.Name)
+	}
+	if len(items) == 0 {
+		notify("no network interfaces found")
+		return ""
+	}
+	items = append(items, selectItem{label: "← Back"})
+	i, ok := runSelect("Network interface", items)
+	if !ok || i == len(names) {
+		return ""
+	}
+	return "iface:" + names[i]
 }
 
 // ---- subscriptions ---------------------------------------------------------
@@ -582,6 +644,8 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			{"View metadata", ""},
 			{"View / toggle nodes", ""},
 			{"Test all nodes", "measure real latency through every node"},
+			{"Pool health", "per-node timeline of the pools using it"},
+			{"Switch strategy", strategyLine(sub.Strategy)},
 			{"Refresh now", ""},
 			{"Refresh interval / cap", ""},
 			{toggle, ""},
@@ -589,7 +653,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			{"Remove", ""},
 			{"← Back", ""},
 		})
-		if !ok || i == 8 {
+		if !ok || i == 10 {
 			return
 		}
 		switch i {
@@ -600,6 +664,11 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 		case 2:
 			s.testSub(sub)
 		case 3:
+			name := sub.Name
+			s.healthView(func(p *emxv1.PoolHealthPool) bool { return poolUsesSub(p, name) })
+		case 4:
+			s.subSetStrategy(sub)
+		case 5:
 			notify("refreshing…")
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			r, err := s.c.SubRefresh(ctx, &emxv1.SubRefreshRequest{Id: sub.Id})
@@ -611,9 +680,9 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				notify("refreshed: %d nodes (+%d -%d)", r.Nodes, r.Added, r.Removed)
 			}
-		case 4:
+		case 6:
 			s.subSetOptions(sub)
-		case 5:
+		case 7:
 			ctx, cancel := call()
 			_, err := s.c.SubSetEnabled(ctx, &emxv1.SetEnabledRequest{Id: sub.Id, Enabled: !sub.Enabled})
 			cancel()
@@ -622,7 +691,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			} else {
 				sub.Enabled = !sub.Enabled
 			}
-		case 6:
+		case 8:
 			name, ok := runInput("New name", sub.Name)
 			if !ok || name == "" || name == sub.Name {
 				break
@@ -636,7 +705,7 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 				notify("renamed to %s", name)
 				sub.Name = name
 			}
-		case 7:
+		case 9:
 			if confirm("Remove subscription " + sub.Name + "?") {
 				ctx, cancel := call()
 				_, err := s.c.SubRemove(ctx, &emxv1.IdRequest{Id: sub.Id})
@@ -650,6 +719,32 @@ func (s *menuSession) subActions(sub *emxv1.SubInfo) {
 			}
 		}
 	}
+}
+
+// subSetStrategy lets the user pick how pools drawing on sub switch nodes.
+func (s *menuSession) subSetStrategy(sub *emxv1.SubInfo) {
+	opts := []string{"auto", "stable", "agile", "manual"}
+	i, ok := runSelect("Switch strategy for "+sub.Name, []selectItem{
+		{"auto", "the daemon picks per pool"},
+		{"stable", "sticky pick, parks dead nodes — for pools that stay up"},
+		{"agile", "follows nodes that come and go in waves; closes dead nodes' connections"},
+		{"manual", "only the nodes you pin (View / toggle nodes → Pin)"},
+		{"← Back", ""},
+	})
+	if !ok || i == len(opts) {
+		return
+	}
+	ctx, cancel := call()
+	reply, err := s.c.SubSetOptions(ctx, &emxv1.SubOptionsRequest{
+		Id: sub.Id, IntervalSec: sub.IntervalSec, NodeCap: sub.NodeCap, UserAgent: sub.UserAgent, Strategy: opts[i],
+	})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	sub.Strategy = reply.Sub.Strategy
+	notify("strategy: %s", strategyLine(sub.Strategy))
 }
 
 // subSetOptions prompts for a new refresh interval and node cap and applies them.
@@ -736,11 +831,14 @@ func (s *menuSession) nodesMenu(sub *emxv1.SubInfo) {
 				icon = "!"
 				lat = "refused by xray: " + n.Rejected
 			}
+			if n.Pinned {
+				icon = "📌"
+			}
 			items = append(items, selectItem{label: fmt.Sprintf("%s %s", icon, n.Name), desc: lat})
 		}
 		items = append(items, selectItem{label: "⚡ Test all nodes"}, selectItem{label: "← Back"})
 
-		i, ok := runSelect(fmt.Sprintf("%s — nodes (✓ active · ✗ disabled · z parked dead · ! refused)", sub.Name), items)
+		i, ok := runSelect(fmt.Sprintf("%s — nodes (✓ active · ✗ disabled · z parked dead · ! refused · 📌 pinned)", sub.Name), items)
 		if !ok || i == len(items)-1 {
 			return
 		}
@@ -762,12 +860,36 @@ func (s *menuSession) nodeActions(sub *emxv1.SubInfo, n *emxv1.NodeInfo) {
 	if n.LatencyMs > 0 {
 		title += fmt.Sprintf(" (%dms)", n.LatencyMs)
 	}
+	pin, pinDesc := "Pin", "manual strategy routes only through pinned nodes"
+	if n.Pinned {
+		pin, pinDesc = "Unpin", ""
+	}
+	if sub.Strategy != "manual" && !n.Pinned {
+		pinDesc = "takes effect once the strategy is manual"
+	}
 	i, ok := runSelect("Node: "+title, []selectItem{
 		{"Test", "measure real latency through this node"},
 		{toggle, "durable — survives a refresh"},
+		{pin, pinDesc},
 		{"← Back", ""},
 	})
-	if !ok || i == 2 {
+	if !ok || i == 3 {
+		return
+	}
+	if i == 2 {
+		ctx, cancel := call()
+		_, err := s.c.SubSetNodePinned(ctx, &emxv1.SubNodePinnedRequest{SubId: sub.Id, Fingerprint: n.Fingerprint, Pinned: !n.Pinned})
+		cancel()
+		switch {
+		case err != nil:
+			notify("error: %v", err)
+		case n.Pinned:
+			notify("unpinned %s", n.Name)
+		case sub.Strategy != "manual":
+			notify("pinned %s — switch the strategy to manual to route only through pinned nodes", n.Name)
+		default:
+			notify("pinned %s", n.Name)
+		}
 		return
 	}
 	if i == 0 {
@@ -1030,6 +1152,23 @@ func (s *menuSession) pickDialer() string {
 }
 
 // ---- read-only views -------------------------------------------------------
+
+// healthView prints the pool health timeline (pools kept by keep, or all)
+// above the menu.
+func (s *menuSession) healthView(keep func(*emxv1.PoolHealthPool) bool) {
+	ctx, cancel := call()
+	reply, err := s.c.PoolHealth(ctx, &emxv1.PoolHealthRequest{})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	pools := reply.Pools
+	if keep != nil {
+		pools = filterPools(pools, keep)
+	}
+	fmt.Print("\n" + renderHealth(pools, termWidth()) + "\n")
+}
 
 // trafficView lets the user pick a window, then prints the traffic chart above
 // the menu. Loops so windows can be switched without re-entering.

@@ -27,6 +27,9 @@ type Subscription struct {
 	IntervalSec int    // refresh cadence; 0 => default
 	NodeCap     int    // max active nodes; 0 => default
 	Enabled     bool   `gorm:"default:true"`
+	// Strategy is how pools drawing on this subscription switch between its
+	// nodes: StrategyStable, StrategyAgile, or "" / StrategyAuto.
+	Strategy    string
 	LastFetched time.Time
 	LastError   string
 
@@ -39,6 +42,42 @@ type Subscription struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Pool switch strategies (Subscription.Strategy, Slot.Strategy).
+//
+// Stable suits pools whose nodes stay up or down for long stretches: the
+// daemon ranks members over time, keeps a sticky active pair plus a spare and
+// parks nodes that stay dead. Agile suits pools whose nodes come and go in
+// waves a minute or so apart: no parking, no smoothing, the active set is
+// every member alive in the latest round (up to a cap) and connections on a
+// member that dies are closed so apps reconnect onto a live one. Auto lets
+// the daemon choose per pool from its health history (AutoTuning). Manual
+// routes only through the nodes the user pinned: no switching, no parking.
+const (
+	StrategyAuto   = "auto"
+	StrategyStable = "stable"
+	StrategyAgile  = "agile"
+	StrategyManual = "manual"
+)
+
+// ParseStrategy normalizes a user-given strategy ("" means auto).
+func ParseStrategy(s string) (string, error) {
+	switch v := strings.ToLower(strings.TrimSpace(s)); v {
+	case "", StrategyAuto:
+		return StrategyAuto, nil
+	case StrategyStable, StrategyAgile, StrategyManual:
+		return v, nil
+	}
+	return "", fmt.Errorf("unknown strategy %q (want auto, stable, agile or manual)", s)
+}
+
+// EffectiveStrategy returns the subscription's strategy, auto when unset.
+func (s Subscription) EffectiveStrategy() string {
+	if v, err := ParseStrategy(s.Strategy); err == nil {
+		return v
+	}
+	return StrategyAuto
 }
 
 // EffectiveInterval applies the default when IntervalSec is unset.
@@ -78,6 +117,10 @@ type SubNodeOverride struct {
 	SubID       uint   `gorm:"uniqueIndex:idx_sub_fp;not null"`
 	Fingerprint string `gorm:"uniqueIndex:idx_sub_fp;not null"`
 	Disabled    bool
+	// Pinned: a manual-strategy pool routes only through its pinned nodes.
+	// A pinned node is always loaded (outside the node cap); pinning enables
+	// a node, disabling unpins it.
+	Pinned bool
 }
 
 // XrayEntry is a user outbound. An empty Dialer is a normal entry; a non-empty
@@ -149,7 +192,9 @@ type Inbound struct {
 	// port is Port. Auto-detected/overridable; may be a placeholder.
 	PublicHost string
 
-	// Target egress: "master:NAME" | "xray:NAME" | "direct".
+	// Target egress: "master:NAME" | "xray:NAME" | "iface:NAME" | "direct".
+	// iface leaves this box out of the named network interface (a second
+	// uplink, a VPN tunnel like wg0) instead of the default route.
 	Target string `gorm:"not null"`
 
 	CreatedAt time.Time
@@ -183,7 +228,11 @@ const (
 	TargetDirect = "direct"
 	KindMaster   = "master"
 	KindXray     = "xray"
+	KindIface    = "iface"
 )
+
+// ifaceNameRe matches a network interface name (Linux caps them at 15 bytes).
+var ifaceNameRe = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,15}$`)
 
 // ParseTarget splits an inbound Target into (kind, name). "direct" yields
 // (direct, ""). Unknown forms return an error.
@@ -194,10 +243,15 @@ func ParseTarget(t string) (kind, name string, err error) {
 	}
 	k, n, ok := strings.Cut(t, ":")
 	if !ok || n == "" {
-		return "", "", fmt.Errorf("bad target %q (want master:NAME | xray:NAME | direct)", t)
+		return "", "", fmt.Errorf("bad target %q (want master:NAME | xray:NAME | iface:NAME | direct)", t)
 	}
 	switch k {
 	case KindMaster, KindXray:
+		return k, n, nil
+	case KindIface:
+		if !ifaceNameRe.MatchString(n) {
+			return "", "", fmt.Errorf("bad interface name %q", n)
+		}
 		return k, n, nil
 	default:
 		return "", "", fmt.Errorf("unknown target kind %q", k)
