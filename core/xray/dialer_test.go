@@ -77,7 +77,7 @@ func TestGenerateWithSlots(t *testing.T) {
 
 	// balancer over slot0-out- prefix.
 	bals := dig(t, m, "routing", "balancers").([]any)
-	if dig(t, bals, 0, "tag") != "slot0-bal" {
+	if dig(t, bals, 0, "tag") != "slot0-bal-M" {
 		t.Errorf("balancer tag = %v", dig(t, bals, 0, "tag"))
 	}
 	if dig(t, bals, 0, "selector").([]any)[0] != "slot0-out-" {
@@ -186,8 +186,9 @@ func TestGenerateNoSlotsKeepsLiveSections(t *testing.T) {
 	}
 }
 
-// Masters sharing a pool share one slot: one inbound, one balancer, one set of
-// members (so one set of probes) — but each keeps its own dialer outbound.
+// Masters sharing a pool share one slot: one inbound, one set of members (so
+// one set of probes) — but each keeps its own dialer outbound, logs into the
+// slot as its own vless user, and gets its own balancer with its own pick.
 func TestGenerateSharedSlot(t *testing.T) {
 	entries := []XrayEntry{
 		{Name: "A", Enabled: true, Dialer: "xraysub:s", Outbound: `{"protocol":"vless","settings":{"vnext":[]}}`},
@@ -195,11 +196,43 @@ func TestGenerateSharedSlot(t *testing.T) {
 	}
 	slots := []Slot{{Master: "A", Aliases: []string{"B"}, Index: 0, Members: []SlotMember{
 		{Key: "n1", Outbound: `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.4","port":1}]}}`},
+		{Key: "n2", Outbound: `{"protocol":"socks","settings":{"servers":[{"address":"1.2.3.5","port":1}]}}`},
+	}, Picked: []string{"n1", "n2"}, Active: 1, MasterPicks: map[string]MasterPick{
+		"B": {Picked: []string{"n2", "n1"}, Active: 1},
 	}}}
 	m := om(t, mustGen(t, entries, slots))
 
-	if n := len(dig(t, m, "routing", "balancers").([]any)); n != 1 {
-		t.Fatalf("balancers = %d, want 1 shared", n)
+	bals := map[string]map[string]any{}
+	for _, b := range dig(t, m, "routing", "balancers").([]any) {
+		bals[b.(map[string]any)["tag"].(string)] = b.(map[string]any)
+	}
+	if len(bals) != 2 {
+		t.Fatalf("balancers = %v, want one per master", bals)
+	}
+	if sel := bals["slot0-bal-A"]["selector"].([]any); len(sel) != 1 || sel[0] != "slot0-out-n1" {
+		t.Errorf("A follows the pool pick: selector %v", sel)
+	}
+	if sel := bals["slot0-bal-B"]["selector"].([]any); len(sel) != 1 || sel[0] != "slot0-out-n2" {
+		t.Errorf("B uses its own pick: selector %v", sel)
+	}
+	users := map[string]string{}
+	for _, r := range dig(t, m, "routing", "rules").([]any) {
+		rm := r.(map[string]any)
+		if u, ok := rm["user"].([]any); ok {
+			users[u[0].(string)] = rm["balancerTag"].(string)
+		}
+	}
+	if users[DialerEmail("A")] != "slot0-bal-A" || users[DialerEmail("B")] != "slot0-bal-B" {
+		t.Errorf("each master's dialer user must route to its balancer: %v", users)
+	}
+	var slotIn map[string]any
+	for _, in := range dig(t, m, "inbounds").([]any) {
+		if in.(map[string]any)["tag"] == "slot0-in" {
+			slotIn = in.(map[string]any)
+		}
+	}
+	if slotIn["protocol"] != "vless" || len(dig(t, slotIn, "settings", "clients").([]any)) != 2 {
+		t.Errorf("slot inbound must be vless with a client per master: %v", slotIn)
 	}
 	var slotIns, members int
 	for _, in := range dig(t, m, "inbounds").([]any) {
@@ -216,13 +249,16 @@ func TestGenerateSharedSlot(t *testing.T) {
 		case strings.HasPrefix(tag, "slot0-out-"):
 			members++
 		case strings.HasPrefix(tag, "dialer-"):
-			dialers[tag] = dig(t, ob, "settings", "servers", 0, "port")
+			dialers[tag] = dig(t, ob, "settings", "vnext", 0, "port")
+			if id := dig(t, ob, "settings", "vnext", 0, "users", 0, "id"); id != DialerUUID(strings.TrimPrefix(tag, "dialer-")) {
+				t.Errorf("%s logs in as %v", tag, id)
+			}
 		case tag == "out-A" || tag == "out-B":
 			proxies[tag] = dig(t, ob, "streamSettings", "sockopt", "dialerProxy")
 		}
 	}
-	if slotIns != 1 || members != 1 {
-		t.Errorf("slot inbounds = %d, members = %d; want 1 and 1", slotIns, members)
+	if slotIns != 1 || members != 2 {
+		t.Errorf("slot inbounds = %d, members = %d; want 1 and 2", slotIns, members)
 	}
 	port := float64(SlotPort(0))
 	if len(dialers) != 2 || dialers["dialer-A"] != port || dialers["dialer-B"] != port {

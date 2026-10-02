@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -22,8 +23,12 @@ import (
 // lost ping on a lossy uplink; a node that is really dead fails both. 10s
 // keeps the cost low: each ping is a full outbound dial through the node, and
 // probe fan-out already scales with unique pools, not masters.
+//
+// The ping is HTTPS: a node can relay plain HTTP fine and still break TLS
+// through it (seen on real subscriptions), and every master connection it
+// carries is TLS.
 const (
-	DefaultProbeURL           = "http://www.gstatic.com/generate_204"
+	DefaultProbeURL           = "https://www.gstatic.com/generate_204"
 	DefaultProbeInterval      = "10s"
 	DefaultProbeSampling      = 2
 	DefaultPingTimeout        = "5s"
@@ -163,12 +168,13 @@ type SlotMember struct {
 // to it, and the members its balancer selects among.
 //
 // Masters whose Dialer names the same refs share one slot: Master is the owner
-// (first by name), Aliases the rest. They share the slot inbound, balancer and
-// member outbounds instead of getting a copy each — every copy is a full set of
+// (first by name), Aliases the rest. They share the slot inbound and member
+// outbounds instead of getting a copy each — every copy is a full set of
 // outbounds the observatory probes on its own, so N masters on one
 // subscription used to mean N probes per node per interval. Each master still
-// keeps its own dialer-NAME outbound, so sharing never changes a master's own
-// outbound.
+// keeps its own dialer-NAME outbound and its own balancer: its dialer hop logs
+// into the slot as its own user, and routing sends each user to its master's
+// balancer, because a node that carries one master can fail another.
 type Slot struct {
 	Master  string
 	Aliases []string
@@ -181,6 +187,11 @@ type Slot struct {
 	Picked []string
 	// Active is how many of Picked are active; 0 = SlotBalancerExpected.
 	Active int
+	// MasterPicks overrides Picked/Active for one master (owner or alias):
+	// its own ranking, from probing that master through each member. A node
+	// can carry one master and not another, so masters sharing a pool each
+	// get their own balancer. A master absent here uses Picked/Active.
+	MasterPicks map[string]MasterPick
 	// Strategy is the pool's effective switch strategy: StrategyStable or
 	// StrategyAgile ("" = stable).
 	Strategy string
@@ -190,14 +201,59 @@ type Slot struct {
 	Pinned []string
 }
 
-// ActiveCount is how many leading Picked keys the balancer spreads over.
-func (s Slot) ActiveCount() int {
-	n := s.Active
-	if n <= 0 {
-		n = SlotBalancerExpected
-	}
-	return min(n, len(s.Picked))
+// MasterPick is one master's ranking within its slot, as Slot.Picked/Active.
+type MasterPick struct {
+	Picked []string
+	Active int
 }
+
+// ActiveCount is how many leading Picked keys the balancer spreads over.
+func (p MasterPick) ActiveCount() int { return activeCount(p.Active, p.Picked) }
+
+// ActiveCount is how many leading Picked keys the balancer spreads over.
+func (s Slot) ActiveCount() int { return activeCount(s.Active, s.Picked) }
+
+func activeCount(active int, picked []string) int {
+	if active <= 0 {
+		active = SlotBalancerExpected
+	}
+	return min(active, len(picked))
+}
+
+// PickOf is master's ranking: its own when it has one, else the pool's.
+func (s Slot) PickOf(master string) MasterPick {
+	if p, ok := s.MasterPicks[master]; ok {
+		return p
+	}
+	return MasterPick{Picked: s.Picked, Active: s.Active}
+}
+
+// ActiveKeys is every member some master of the slot routes through: the
+// union of the masters' active picks.
+func (s Slot) ActiveKeys() map[string]bool {
+	out := map[string]bool{}
+	for _, m := range s.SlotMasters() {
+		p := s.PickOf(m)
+		for _, k := range p.Picked[:p.ActiveCount()] {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// PickedKeys is every member in some master's pick, active or spare.
+func (s Slot) PickedKeys() map[string]bool {
+	out := map[string]bool{}
+	for _, m := range s.SlotMasters() {
+		for _, k := range s.PickOf(m).Picked {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// Ranked reports whether the daemon has ranked the pool yet.
+func (s Slot) Ranked() bool { return len(s.Picked) > 0 || len(s.MasterPicks) > 0 }
 
 // Agile reports whether the pool runs the agile strategy.
 func (s Slot) Agile() bool { return s.Strategy == StrategyAgile }
@@ -244,10 +300,28 @@ func DialerGroupKey(refs []DialerRef) string {
 
 // Slot tag/port helpers. idx is Slot.Index.
 func SlotInTag(idx int) string       { return fmt.Sprintf("slot%d-in", idx) }
-func SlotBalTag(idx int) string      { return fmt.Sprintf("slot%d-bal", idx) }
 func SlotOutPrefix(idx int) string   { return fmt.Sprintf("slot%d-out-", idx) }
 func SlotPort(idx int) int           { return SlotPortStart + idx }
 func DialerTag(master string) string { return "dialer-" + sanitizeKey(master) }
+
+// SlotBalTag is master's balancer in slot idx: every master on a slot gets
+// its own, so each can be steered to the nodes that carry it.
+func SlotBalTag(idx int, master string) string {
+	return fmt.Sprintf("slot%d-bal-%s", idx, sanitizeKey(master))
+}
+
+// DialerEmail is the user a master's dialer hop logs into its slot as; the
+// slot's routing sends each user to that master's balancer.
+func DialerEmail(master string) string { return "dialer-" + sanitizeKey(master) }
+
+// DialerUUID is the vless id of master's dialer hop, derived from the name.
+// The slot listens on loopback only, so it identifies, it doesn't protect.
+func DialerUUID(master string) string {
+	h := sha256.Sum256([]byte("emx-dialer:" + master))
+	h[6] = h[6]&0x0f | 0x40
+	h[8] = h[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", h[0:4], h[4:6], h[6:8], h[8:10], h[10:16])
+}
 
 // DialerSourceAddr is the loopback address a master's dialer hop connects
 // from (GenOptions.DialerSource). Every connection the master makes into its

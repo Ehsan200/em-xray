@@ -44,7 +44,7 @@ func TestPickPrefersSteadyOverFlakyFast(t *testing.T) {
 	}
 	// Active pair (sorted) is the two clean nodes; the flaky fast one is only
 	// the spare, and the dead one isn't picked.
-	got := p.pick(0, sl[0].Members, nil)
+	got := pickKeys(p, sl[0].Members, nil)
 	if want := []string{"slow", "steady", "flaky"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("pick = %v, want %v", got, want)
 	}
@@ -55,13 +55,13 @@ func TestPickSticksUnlessClearlyBeaten(t *testing.T) {
 	sl := pickSlot("a", "b", "c")
 	// Spare c marginally faster than active b: b stays active.
 	p.observe(sl, tags(map[string]nodeStatus{"a": win(3, 0, 100), "b": win(3, 0, 200), "c": win(3, 0, 180)}))
-	if got := p.pick(0, sl[0].Members, []string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+	if got := pickKeys(p, sl[0].Members, []string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
 		t.Fatalf("spare c took active b's place over a marginal gain: %v", got)
 	}
 	// Spare c clearly faster than active b: they swap.
 	p = newNodePicker()
 	p.observe(sl, tags(map[string]nodeStatus{"a": win(3, 0, 100), "b": win(3, 0, 400), "c": win(3, 0, 100)}))
-	if got := p.pick(0, sl[0].Members, []string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"a", "c", "b"}) {
+	if got := pickKeys(p, sl[0].Members, []string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"a", "c", "b"}) {
 		t.Fatalf("clearly faster spare c not promoted: %v", got)
 	}
 }
@@ -71,7 +71,7 @@ func TestPickSticksPickedSet(t *testing.T) {
 	p := newNodePicker()
 	sl := pickSlot("a", "b", "c", "d")
 	p.observe(sl, tags(map[string]nodeStatus{"a": win(3, 0, 100), "b": win(3, 0, 100), "c": win(3, 0, 300), "d": win(3, 0, 280)}))
-	if got := p.pick(0, sl[0].Members, []string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+	if got := pickKeys(p, sl[0].Members, []string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
 		t.Fatalf("spare c lost to a marginally faster newcomer d: %v", got)
 	}
 }
@@ -80,7 +80,7 @@ func TestPickFailingIncumbentDropsOut(t *testing.T) {
 	p := newNodePicker()
 	sl := pickSlot("a", "b", "c", "d")
 	p.observe(sl, tags(map[string]nodeStatus{"a": win(3, 1, 100), "b": win(3, 0, 300), "c": win(3, 0, 300), "d": win(3, 0, 300)}))
-	got := p.pick(0, sl[0].Members, []string{"a", "b", "c"})
+	got := pickKeys(p, sl[0].Members, []string{"a", "b", "c"})
 	if got[0] == "a" || len(got) != 3 || contains(got, "a") {
 		t.Fatalf("failing incumbent kept: %v", got)
 	}
@@ -98,14 +98,14 @@ func contains(s []string, v string) bool {
 func TestPickIgnoresUplinkDownAndNoData(t *testing.T) {
 	p := newNodePicker()
 	sl := pickSlot("a", "b")
-	if got := p.pick(0, sl[0].Members, nil); got != nil {
+	if got := pickKeys(p, sl[0].Members, nil); got != nil {
 		t.Fatalf("pick with no data = %v, want nil", got)
 	}
 	p.observe(sl, tags(map[string]nodeStatus{"a": win(3, 0, 100), "b": win(3, 0, 300)}))
 	if p.observe(sl, tags(map[string]nodeStatus{"a": win(3, 3, 0), "b": win(3, 3, 0)})) {
 		t.Fatal("all-dead poll was not ignored")
 	}
-	if got := p.pick(0, sl[0].Members, nil); !reflect.DeepEqual(got, []string{"a", "b"}) {
+	if got := pickKeys(p, sl[0].Members, nil); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Fatalf("uplink outage changed the pick: %v", got)
 	}
 }
@@ -166,4 +166,15 @@ func waitObservatory(t *testing.T, ready func(map[string]nodeStatus) bool) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// pickKeys is the pool-level stable pick's keys (no chain view).
+func pickKeys(p *nodePicker, members []xray.SlotMember, incumbent []string) []string {
+	keys, _ := p.pick(0, members, incumbent, nil)
+	return keys
+}
+
+// poolPick is a slot's pool-level pick as incumbents.
+func poolPick(sl xray.Slot) xray.MasterPick {
+	return xray.MasterPick{Picked: sl.Picked, Active: sl.Active}
 }

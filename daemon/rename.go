@@ -37,23 +37,50 @@ func (s *Supervisor) RenamedRef(kind, old, name string) {
 	for i, sl := range s.loadedSlots {
 		sl.Key = rekey(sl.Key)
 		if oldMember != "" {
-			picked := append([]string(nil), sl.Picked...)
-			for j, k := range picked {
-				if k == oldMember {
-					picked[j] = newMember
+			sl.Picked = renamedKeys(sl.Picked, oldMember, newMember)
+			for _, m := range sl.Members {
+				if m.Key == oldMember {
 					s.picker.rename(xray.SlotMemberTag(sl.Index, oldMember), xray.SlotMemberTag(sl.Index, newMember))
 				}
 			}
-			sl.Picked = picked
+		}
+		// Per-master picks: keyed by master name, holding member keys.
+		if len(sl.MasterPicks) > 0 {
+			mp := make(map[string]xray.MasterPick, len(sl.MasterPicks))
+			for master, p := range sl.MasterPicks {
+				if kind == xray.RefXray && master == xray.NormalizeName(old) {
+					master = name
+				}
+				if oldMember != "" {
+					p.Picked = renamedKeys(p.Picked, oldMember, newMember)
+				}
+				mp[master] = p
+			}
+			sl.MasterPicks = mp
 		}
 		slots[i] = sl
 	}
 	s.loadedSlots = slots
 	if oldMember != "" {
 		s.parker.rename(oldMember, newMember)
+		s.chain.renameMember(oldMember, newMember)
+	}
+	if kind == xray.RefXray {
+		s.chain.renameMaster(xray.NormalizeName(old), name)
 	}
 	s.history.rename(rekey, oldMember, newMember)
 	s.auto.rename(rekey)
+}
+
+// renamedKeys returns keys with old replaced by key, as a copy.
+func renamedKeys(keys []string, old, key string) []string {
+	out := append([]string(nil), keys...)
+	for i, k := range out {
+		if k == old {
+			out[i] = key
+		}
+	}
+	return out
 }
 
 // rename moves a member's score to its new tag.

@@ -23,7 +23,7 @@ func TestPickAgileFollowsTheWave(t *testing.T) {
 		"a": win(2, 0, 100), "b": win(2, 0, 200), "c": win(2, 0, 300),
 		"d": win(2, 2, 0), "e": win(2, 2, 0), "f": win(2, 0, 50), "g": win(2, 0, 900),
 	}))
-	got, active := p.pickFor(sl[0], xray.Slot{})
+	got, active := p.pickFor(sl[0], poolPick(xray.Slot{}), nil)
 	// Top agileActiveMax alive by RTT (sorted by key), then the next alive.
 	if want := []string{"a", "b", "c", "f", "g"}; !reflect.DeepEqual(got, want) || active != agileActiveMax {
 		t.Fatalf("pick = %v active %d, want %v active %d", got, active, want, agileActiveMax)
@@ -36,7 +36,7 @@ func TestPickAgileFollowsTheWave(t *testing.T) {
 	}))
 	prev := sl[0]
 	prev.Picked, prev.Active = got, active
-	got, active = p.pickFor(sl[0], prev)
+	got, active = p.pickFor(sl[0], poolPick(prev), nil)
 	if len(got) < 3 || active != 3 || !reflect.DeepEqual(got[:3], []string{"d", "e", "g"}) {
 		t.Fatalf("after the wave pick = %v active %d, want d e g active", got, active)
 	}
@@ -58,7 +58,7 @@ func TestPickAgileSticky(t *testing.T) {
 	}))
 	prev := sl[0]
 	prev.Picked, prev.Active = []string{"a", "b", "c", "d", "e"}, 4
-	got, _ := p.pickFor(sl[0], prev)
+	got, _ := p.pickFor(sl[0], poolPick(prev), nil)
 	if !reflect.DeepEqual(got[:4], []string{"a", "b", "c", "d"}) {
 		t.Fatalf("active d lost its place to marginally faster e: %v", got)
 	}
@@ -75,7 +75,7 @@ func TestPickAgileNothingAlive(t *testing.T) {
 	h := tags(map[string]nodeStatus{"a": win(2, 2, 0), "b": win(2, 2, 0), "c": win(2, 2, 0)})
 	h[xray.SlotMemberTag(1, "z")] = win(2, 0, 10)
 	p.observe(both, h)
-	got, active := p.pickFor(sl[0], xray.Slot{})
+	got, active := p.pickFor(sl[0], poolPick(xray.Slot{}), nil)
 	if len(got) == 0 || active != min(xray.SlotBalancerExpected, len(got)) {
 		t.Fatalf("pick = %v active %d, want the stable fallback", got, active)
 	}
@@ -214,7 +214,7 @@ func TestResolveManualPool(t *testing.T) {
 	// Health never repicks a manual pool away from its pins.
 	p := sup.picker
 	p.observe([]xray.Slot{sl}, map[string]nodeStatus{xray.SlotMemberTag(sl.Index, "fp-1.1.1.3"): win(2, 2, 0), xray.SlotMemberTag(sl.Index, "fp-2.2.2.1"): win(2, 0, 10)})
-	if got, _ := p.pickFor(sl, sl); !reflect.DeepEqual(got, sl.Pinned) {
+	if got, _ := p.pickFor(sl, poolPick(sl), nil); !reflect.DeepEqual(got, sl.Pinned) {
 		t.Fatalf("repick = %v, want the pins", got)
 	}
 }

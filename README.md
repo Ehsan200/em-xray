@@ -226,9 +226,10 @@ is set. Change any inbound's target live with `emx in target <id> <target>` or T
 finish on the old path.
 
 Dialer refs, comma-separated: `xray:NAME`, `xraysub:NAME` (`proxy:NAME` not supported). A master may
-mix refs. Masters naming the same refs (in any order) share one slot — one balancer, one set of
-member outbounds, one set of probes — so probe cost scales with unique pools, not masters. Each
-still keeps its own `dialer-<master>` outbound. Past 32 unique pools a master's dialer is pointed at
+mix refs. Masters naming the same refs (in any order) share one slot — one set of member outbounds,
+one set of observatory pings — so ping cost scales with unique pools, not masters. Each still keeps
+its own `dialer-<master>` outbound and its own balancer, because a node that carries one master can
+fail another. Past 32 unique pools a master's dialer is pointed at
 the blackhole (fails closed) rather than dialing off this box.
 
 ---
@@ -327,11 +328,14 @@ xray's `dialerProxy` can't point at a balancer, so the tunnel is a loopback casc
 
 ```
 master outbound
-  sockopt.dialerProxy → "dialer-<master>"      (stable socks outbound)
-    → 127.0.0.1:<slotPort>                     (slot socks inbound)
-      → routing: slotN-in → balancerTag slotN-bal
-        → spreads over the best 2 slotN-out-<key> members → the node outbound
+  sockopt.dialerProxy → "dialer-<master>"      (stable vless outbound, user dialer-<master>)
+    → 127.0.0.1:<slotPort>                     (slot vless inbound, one client per master)
+      → routing: slotN-in + user dialer-<master> → balancerTag slotN-bal-<master>
+        → spreads over that master's best 2 slotN-out-<key> members → the node outbound
 ```
+
+The hop is vless rather than socks because socks loses the user on UDP, which a WireGuard (WARP)
+master sends.
 
 Members share the `slotN-out-` tag **prefix**, so the balancer and the shared observatory adopt
 live-added members with no reload.
@@ -345,6 +349,23 @@ as `fallbackTag` — probed, carrying nothing until both active nodes are down. 
 dropped by xray within one ping round, without waiting for the daemon, and losing both active
 nodes lands on one that was answering. A pool keeps its slot index across changes, so adding a master
 never renumbers another pool's slot.
+
+**Each master is checked through each node.** A ping proves a node answers, not that it carries a
+master. Some networks let a connection to a node start and cut it after a few KB, so a tiny ping
+reply passes (and looks fastest) while a TLS handshake or any real transfer dies. And a node can
+reach one master's server and not another's. So every minute the daemon looks for due pairs and, in a
+throwaway xray (the live one is never touched), chains a master's real outbound through a node
+and downloads 64 KB over HTTPS through the pair; a stall is a failure. Per master it covers its
+current pick, then the pool's ranking until 4 nodes not known to fail it are covered, each
+re-probed every 10 minutes. The verdicts rank that master's own balancer: a node that fails the
+master is never one of its active nodes nor its spare while any other node might carry it, and a
+node proven to carry it ranks above unproven ones by the chain latency. When every node probed for
+a master fails in the same round, the master's own server is blamed, not the nodes (each round
+re-probes the master's best proven node as the control). Verdicts expire after 30 minutes and are
+cleared when this box's addresses change or the uplink comes back after every node looked dead.
+Manual pools are left alone (the pins are the pick). `journalctl -u emx` logs each verdict change
+(`chain probe: M via node: does NOT carry it (stalled after 3 KB …)`), and `emx winner` shows each
+master's own nodes.
 
 **xray is restarted only when unavoidable.** Every change — adding/editing/removing an entry,
 inbound, user or master, a subscription refresh, a node toggle — regenerates the config, diffs it
@@ -380,7 +401,8 @@ An inbound routed through a master must never egress from this box's IP. The rul
 - A master itself can't be hysteria: xray's hysteria client ignores `dialerProxy` and would dial its
   server straight off this box. Adding, editing or importing one is refused; one already stored is
   generated as a blackhole. Hysteria works fine as a pool member or as a plain `xray:` target.
-- Each balancer falls back to the daemon's **spare** node once the pool is ranked, and to the pool's
+- Each balancer falls back to the daemon's **spare** node (never one that failed the master's chain
+  probe) once the pool is ranked, and to the pool's
   **first member** before that (right after a start, when nothing has answered a ping yet) — so a
   restart doesn't black out masters until the first ping — and to `block` only when the pool is
   empty.
@@ -393,7 +415,8 @@ An inbound routed through a master must never egress from this box's IP. The rul
 `emx status` and `emx winner` report how many pool members answer pings and which ones the master
 is spread over; `emx in ls` marks the inbounds
 that legitimately use this server's IP. The burst observatory pings every member every 10s (rounds
-of 2 pings, 5s timeout) and a node that fails a whole round is skipped until it answers again —
+of 2 HTTPS pings to `https://www.gstatic.com/generate_204`, 5s timeout — HTTPS so a node that
+breaks TLS doesn't pass on plain HTTP) and a node that fails a whole round is skipped until it answers again —
 within ~20s of dying; `emx probe-interval` changes the cadence (5–3600s).
 
 `emx health` (TUI: main menu and each subscription → "Pool health") draws the last 30 minutes of

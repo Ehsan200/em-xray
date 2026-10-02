@@ -52,6 +52,8 @@ type Supervisor struct {
 	// parker leaves dead pool nodes out of their slot (see nodepark.go).
 	parker *nodeParker
 	picker *nodePicker // ranks pool members (nodepick.go)
+	// chain holds each master's probes through each member (chainprobe.go).
+	chain *chainScores
 	// history records pool health per poll for `emx health` (nodehistory.go).
 	history *nodeHistory
 	// auto picks stable or agile for pools left on auto (autostrategy.go).
@@ -65,6 +67,15 @@ type Supervisor struct {
 	// probeURL overrides the observatory ping destination (tests point it at
 	// a local 204 server); "" = xray.DefaultProbeURL.
 	probeURL string
+	// chainURL overrides ChainProbeURL and chainMinBytes chainProbeBytes
+	// (tests; negative = read no body).
+	chainURL      string
+	chainMinBytes int64
+	// netFP fingerprints this box's addresses, to notice a network change.
+	netMu sync.Mutex
+	netFP string
+	// uplinkDown: the last health poll saw every node dead.
+	uplinkDown bool
 }
 
 const (
@@ -73,7 +84,7 @@ const (
 )
 
 func NewSupervisor(store *xray.Store, p paths.Paths, logger *log.Logger) *Supervisor {
-	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), picker: newNodePicker(), history: newNodeHistory(), auto: newAutoClassifier(), rejected: map[string]rejection{}}
+	s := &Supervisor{store: store, paths: p, log: logger, slotIdx: map[string]int{}, parker: newNodeParker(), picker: newNodePicker(), chain: newChainScores(), history: newNodeHistory(), auto: newAutoClassifier(), rejected: map[string]rejection{}}
 	s.wd = NewWatchdog(xrayCmdFactory(p, logger), logger)
 	return s
 }
@@ -548,7 +559,7 @@ func (s *Supervisor) resolveDialerSlots(entries []xray.XrayEntry) ([]xray.Slot, 
 		slots = append(slots, xray.Slot{Master: e.Name, Key: key, Index: -1, Members: members, Strategy: strategy, Auto: auto, Pinned: pinned})
 	}
 	slots = s.assignSlotIndices(slots)
-	s.picker.pickSlots(slots, s.loadedSlots)
+	s.picker.pickSlots(slots, s.loadedSlots, s.chain)
 	s.logStrategyChanges(slots)
 	return slots, nil
 }

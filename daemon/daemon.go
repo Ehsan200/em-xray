@@ -124,6 +124,7 @@ func Run(ctx context.Context) error {
 	sup.StartHealthMonitor(ctx)
 	// Leave pool nodes that stay dead out of their pools (applied live).
 	sup.StartNodeHealth(ctx)
+	sup.StartChainProbe(ctx)
 	// Keep xray's logs from filling the disk (rolls past the configured cap).
 	NewLogRotator(store, p, logger).Start(ctx)
 

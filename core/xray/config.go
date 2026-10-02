@@ -187,18 +187,29 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	{
 		for _, s := range sl {
 			idx := s.Index
-			// slot socks inbound
+			// The slot inbound: vless on loopback, one client per master, so
+			// routing can tell the masters apart (socks would lose the user
+			// on UDP, which a wireguard master needs).
+			masters := s.SlotMasters()
+			clients := make([]any, 0, len(masters))
+			for _, master := range masters {
+				clients = append(clients, map[string]any{
+					"id": DialerUUID(master), "email": DialerEmail(master),
+				})
+			}
 			inboundsJSON = append(inboundsJSON, map[string]any{
 				"tag": SlotInTag(idx), "listen": "127.0.0.1", "port": SlotPort(idx),
-				"protocol": "socks", "settings": map[string]any{"udp": true, "auth": "noauth"},
+				"protocol": "vless", "settings": map[string]any{"decryption": "none", "clients": clients},
 			})
 			// one stable dialer outbound per master (owner + aliases), all
-			// into the same slot inbound
-			for _, master := range s.SlotMasters() {
+			// into the same slot inbound, each as its own user
+			for _, master := range masters {
 				dialer := map[string]any{
-					"tag": DialerTag(master), "protocol": "socks",
-					"settings": map[string]any{"servers": []any{
-						map[string]any{"address": "127.0.0.1", "port": SlotPort(idx)},
+					"tag": DialerTag(master), "protocol": "vless",
+					"settings": map[string]any{"vnext": []any{
+						map[string]any{"address": "127.0.0.1", "port": SlotPort(idx), "users": []any{
+							map[string]any{"id": DialerUUID(master), "encryption": "none"},
+						}},
 					}},
 				}
 				if opts.DialerSource {
@@ -209,7 +220,7 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 			// member outbounds (shared slotN-out- prefix → live-adoptable).
 			// A member that doesn't tunnel is skipped (the resolver already
 			// drops and logs it): it would egress from this box.
-			fallback := "block"
+			first := ""
 			loaded := map[string]bool{}
 			for _, m := range s.Members {
 				if CheckMemberOutbound(m.Outbound) != nil {
@@ -219,74 +230,20 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 				if err != nil {
 					return nil, fmt.Errorf("master %q: %w", s.Master, err)
 				}
-				if fallback == "block" {
-					fallback = SlotMemberTag(idx, m.Key)
+				if first == "" {
+					first = SlotMemberTag(idx, m.Key)
 				}
 				loaded[m.Key] = true
 				outbounds = append(outbounds, mo)
 			}
-			// Before the daemon has ranked the pool (first pings after a
-			// start) leastLoad over the prefix picks by itself: it only
-			// counts members the observatory has seen answer, and spreads
-			// over the best SlotBalancerExpected of them. No maxRTT cap on
-			// purpose: if every node is slow we still want the least-bad.
-			//
-			// fallbackTag covers the moments nothing qualifies: right after
-			// xray starts (no ping has completed yet) and when every
-			// member's recent pings failed. It is the pool's FIRST member:
-			// with `block` there, every master connection failed until the
-			// first ping landed after each start. A member still egresses
-			// through a node, never this box — CheckMemberOutbound
-			// guarantees it tunnels — so this is not a leak. Only an empty
-			// pool falls back to `block`, keeping the master fail-closed.
-			selector := []any{SlotOutPrefix(idx)}
-			strategy := map[string]any{
-				"type":     "leastLoad",
-				"settings": map[string]any{"expected": SlotBalancerExpected},
+			for _, master := range masters {
+				balancers = append(balancers, slotBalancer(idx, master, s.PickOf(master), loaded, first))
+				// route this master's dialer hop → its balancer
+				rules = append(rules, map[string]any{
+					"type": "field", "inboundTag": []any{SlotInTag(idx)},
+					"user": []any{DialerEmail(master)}, "balancerTag": SlotBalTag(idx, master),
+				})
 			}
-			// Once the daemon has ranked the pool, its pick replaces
-			// leastLoad's: leastLoad orders by RTT jitter, not latency, so it
-			// would reshuffle the daemon's best by noise. The active members
-			// become the selector under `random`, which (with a fallbackTag
-			// set) still skips members the observatory sees dead, so a dying
-			// node drops out on the next ping round, not the next daemon
-			// poll. The spare — ranked next, probed, but carrying nothing —
-			// is the fallback, so losing both active members lands on a
-			// member that was answering rather than on one that just died.
-			// An agile pool's active set is every member alive in the latest
-			// round (up to a cap), so Active says how many there are.
-			var picked []string
-			for _, k := range s.Picked {
-				if loaded[k] {
-					picked = append(picked, SlotMemberTag(idx, k))
-				}
-			}
-			if len(picked) > 0 {
-				active := s.Active
-				if active <= 0 {
-					active = SlotBalancerExpected
-				}
-				active = min(active, len(picked))
-				selector = nil
-				for _, t := range picked[:active] {
-					selector = append(selector, t)
-				}
-				fallback = picked[0]
-				if len(picked) > active {
-					fallback = picked[active]
-				}
-				strategy = map[string]any{"type": "random"}
-			}
-			balancers = append(balancers, map[string]any{
-				"tag": SlotBalTag(idx), "selector": selector,
-				"strategy":    strategy,
-				"fallbackTag": fallback,
-			})
-			// route slot inbound → balancer
-			rules = append(rules, map[string]any{
-				"type": "field", "inboundTag": []any{SlotInTag(idx)},
-				"balancerTag": SlotBalTag(idx),
-			})
 		}
 
 		// One shared burst observatory feeds every slot's balancer; its
@@ -314,6 +271,68 @@ func Generate(entries []XrayEntry, inbounds []Inbound, slots []Slot, opts GenOpt
 	cfg["outbounds"] = outbounds
 	cfg["routing"] = routing
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// slotBalancer is one master's balancer over slot idx's loaded members.
+//
+// Before the daemon has ranked the pool (first pings after a start) leastLoad
+// over the prefix picks by itself: it only counts members the observatory has
+// seen answer, and spreads over the best SlotBalancerExpected of them. No
+// maxRTT cap on purpose: if every node is slow we still want the least-bad.
+//
+// fallbackTag covers the moments nothing qualifies: right after xray starts
+// (no ping has completed yet) and when every member's recent pings failed. It
+// is the pool's FIRST member (first): with `block` there, every master
+// connection failed until the first ping landed after each start. A member
+// still egresses through a node, never this box — CheckMemberOutbound
+// guarantees it tunnels — so this is not a leak. Only an empty pool falls back
+// to `block`, keeping the master fail-closed.
+//
+// Once the daemon has ranked the pool for this master, its pick replaces
+// leastLoad's: leastLoad orders by RTT jitter, not latency, so it would
+// reshuffle the daemon's best by noise. The active members become the
+// selector under `random`, which (with a fallbackTag set) still skips members
+// the observatory sees dead, so a dying node drops out on the next ping round,
+// not the next daemon poll. The spare — ranked next, probed, but carrying
+// nothing — is the fallback, so losing every active member lands on a member
+// that was answering rather than on one that just died.
+func slotBalancer(idx int, master string, pick MasterPick, loaded map[string]bool, first string) map[string]any {
+	fallback := first
+	if fallback == "" {
+		fallback = "block"
+	}
+	selector := []any{SlotOutPrefix(idx)}
+	strategy := map[string]any{
+		"type":     "leastLoad",
+		"settings": map[string]any{"expected": SlotBalancerExpected},
+	}
+	var picked []string
+	for _, k := range pick.Picked {
+		if loaded[k] {
+			picked = append(picked, SlotMemberTag(idx, k))
+		}
+	}
+	if len(picked) > 0 {
+		active := pick.Active
+		if active <= 0 {
+			active = SlotBalancerExpected
+		}
+		active = min(active, len(picked))
+		selector = nil
+		for _, t := range picked[:active] {
+			selector = append(selector, t)
+		}
+		fallback = picked[0]
+		if len(picked) > active {
+			fallback = picked[active]
+		}
+		strategy = map[string]any{"type": "random"}
+	}
+	return map[string]any{
+		"tag": SlotBalTag(idx, master), "selector": selector,
+		"strategy":    strategy,
+		"fallbackTag": fallback,
+	}
 }
 
 // setDialerProxy sets streamSettings.sockopt.dialerProxy on an outbound map,
@@ -559,6 +578,21 @@ func entryOutbound(raw, tag string) (map[string]any, error) {
 	healXHTTPExtra(m)
 	healAllowInsecure(m)
 	return m, nil
+}
+
+// MasterProbeOutbound is master e's outbound as Generate emits it (mux and
+// all), minus its pool wiring, for a probe to chain through one member.
+func MasterProbeOutbound(e XrayEntry) (string, error) {
+	ob, err := entryOutbound(e.Outbound, "master")
+	if err != nil {
+		return "", err
+	}
+	if e.Mux {
+		applyMux(ob)
+	}
+	stripDialerProxy(ob)
+	b, err := json.Marshal(ob)
+	return string(b), err
 }
 
 // healAllowInsecure drops tlsSettings.allowInsecure, which xray v26 removed: a

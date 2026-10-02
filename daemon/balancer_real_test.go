@@ -58,11 +58,11 @@ func TestBurstBalancerSpreadsOverLiveMembers(t *testing.T) {
 			if ws[0].Node == "dead" {
 				t.Fatalf("winner is the dead member")
 			}
-			raw, _ = sup.BalancerInfoRaw(xray.SlotBalTag(0))
+			raw, _ = sup.BalancerInfoRaw(xray.SlotBalTag(0, "M"))
 			break
 		}
 		if time.Now().After(deadline) {
-			raw, _ = sup.BalancerInfoRaw(xray.SlotBalTag(0))
+			raw, _ = sup.BalancerInfoRaw(xray.SlotBalTag(0, "M"))
 			t.Fatalf("no winner reported; bi output:\n%s", raw)
 		}
 		time.Sleep(500 * time.Millisecond)

@@ -29,8 +29,32 @@ const (
 	tierHealthy = iota
 	tierUnknown
 	tierSuspect
+	tierChainBad // answers pings, but fails the master's own chain probe
 	tierDead
 )
+
+// Chain classes: what probing one master through a member found.
+const (
+	chainGood = iota
+	chainUnknown
+	chainBad
+)
+
+// chainView is one master's chain verdicts by member key. A nil view knows
+// nothing: every member is chainUnknown, which ranks as before chain probing.
+type chainView map[string]chainVerdict
+
+type chainVerdict struct {
+	class int
+	cost  float64 // chain latency over its pass rate; set for chainGood
+}
+
+func (v chainView) of(key string) chainVerdict {
+	if c, ok := v[key]; ok {
+		return c
+	}
+	return chainVerdict{class: chainUnknown}
+}
 
 type nodeScore struct {
 	ok      float64 // EWMA success ratio
@@ -138,16 +162,23 @@ func (sc *nodeScore) cost() float64 {
 // then the spare (the balancer's fallback). An incumbent keeps its place — in
 // the pick, and again among the active — unless clearly beaten, so a pool
 // doesn't flap between near-equal nodes. nil = no data.
-func (p *nodePicker) pick(idx int, members []xray.SlotMember, incumbent []string) []string {
+//
+// With a chain view (one master's probes through each member), a member that
+// fails the master's chain ranks below every member that might carry it, and
+// one proven to carry it ranks above the unproven, by its chain latency rather
+// than the ping's: a node can answer the observatory and still not carry the
+// master. Returns the keys and how many are active: the active never include
+// a chain-failed member while one that isn't failed is picked.
+func (p *nodePicker) pick(idx int, members []xray.SlotMember, incumbent []string, cv chainView) ([]string, int) {
 	if p == nil || len(members) == 0 {
-		return nil
+		return nil, 0
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.pickStableLocked(idx, members, incumbent)
+	return p.pickStableLocked(idx, members, incumbent, cv)
 }
 
-func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumbent []string) []string {
+func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumbent []string, cv chainView) ([]string, int) {
 	inc, wasActive := map[string]bool{}, map[string]bool{}
 	for i, k := range incumbent {
 		inc[k] = true
@@ -156,29 +187,37 @@ func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumb
 		}
 	}
 	type cand struct {
-		key  string
-		tier int
-		sc   *nodeScore
-		raw  float64
-		cost float64
-		inc  bool
+		key   string
+		tier  int
+		class int
+		sc    *nodeScore
+		raw   float64
+		cost  float64
+		inc   bool
 	}
 	cands := make([]cand, 0, len(members))
 	scored := false
 	for _, m := range members {
 		sc := p.scores[xray.SlotMemberTag(idx, m.Key)]
-		c := cand{key: m.Key, tier: sc.tier(), sc: sc, inc: inc[m.Key]}
+		v := cv.of(m.Key)
+		c := cand{key: m.Key, tier: sc.tier(), class: v.class, sc: sc, inc: inc[m.Key]}
 		if c.tier != tierUnknown {
 			scored = true
 		}
+		if c.class == chainBad && c.tier != tierDead {
+			c.tier = tierChainBad
+		}
 		if c.tier == tierHealthy {
 			c.raw = sc.cost()
+			if c.class == chainGood {
+				c.raw = v.cost
+			}
 			c.cost = c.raw
 		}
 		cands = append(cands, c)
 	}
 	if !scored {
-		return nil
+		return nil, 0
 	}
 	rank := func(cs []cand) {
 		for i := range cs {
@@ -194,12 +233,21 @@ func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumb
 			if a.tier != b.tier {
 				return a.tier < b.tier
 			}
+			if a.class != b.class {
+				return a.class < b.class
+			}
 			switch a.tier {
 			case tierHealthy:
 				if a.cost != b.cost {
 					return a.cost < b.cost
 				}
-			case tierSuspect, tierDead:
+			case tierSuspect, tierChainBad, tierDead:
+				if (a.sc == nil) != (b.sc == nil) {
+					return b.sc == nil
+				}
+				if a.sc == nil {
+					break
+				}
 				if a.sc.ok != b.sc.ok {
 					return a.sc.ok > b.sc.ok
 				}
@@ -233,12 +281,27 @@ func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumb
 	if active > n {
 		active = n
 	}
+	// Never spread onto a chain-failed member while one that isn't failed
+	// leads; when every one failed, fail open over the pool's own order.
+	for active > 1 && top[0].tier != tierChainBad && top[active-1].tier == tierChainBad {
+		active--
+	}
+	// A chain-failed member is never the spare either (the spare is the
+	// balancer's fallback) unless every picked member failed.
+	if top[0].tier != tierChainBad {
+		for i := active; i < n; i++ {
+			if top[i].tier == tierChainBad {
+				n = i
+				break
+			}
+		}
+	}
 	out := make([]string, n)
 	for i := range out {
 		out[i] = top[i].key
 	}
 	sort.Strings(out[:active])
-	return out
+	return out, active
 }
 
 // pickAgile is the agile pool's pick: every member alive in the latest round,
@@ -248,7 +311,11 @@ func (p *nodePicker) pickStableLocked(idx int, members []xray.SlotMember, incumb
 // Members already active keep their place unless clearly beaten, so RTT noise
 // alone doesn't rewrite routing every poll. With nothing alive it falls back
 // to the stable ranking. Returns the keys and how many of them are active.
-func (p *nodePicker) pickAgile(idx int, members []xray.SlotMember, incumbent []string, incActive int) ([]string, int) {
+//
+// With a chain view, members that fail the master's chain are left out of the
+// active set while any other member is alive, and members proven to carry it
+// lead, by chain latency.
+func (p *nodePicker) pickAgile(idx int, members []xray.SlotMember, incumbent []string, incActive int, cv chainView) ([]string, int) {
 	if p == nil || len(members) == 0 {
 		return nil, 0
 	}
@@ -261,11 +328,12 @@ func (p *nodePicker) pickAgile(idx int, members []xray.SlotMember, incumbent []s
 		}
 	}
 	type cand struct {
-		key  string
-		sc   *nodeScore
-		cost float64
+		key   string
+		sc    *nodeScore
+		class int
+		cost  float64
 	}
-	var alive, rest []cand
+	var alive, aliveBad, rest []cand
 	scored := false
 	for _, m := range members {
 		sc := p.scores[xray.SlotMemberTag(idx, m.Key)]
@@ -278,28 +346,47 @@ func (p *nodePicker) pickAgile(idx int, members []xray.SlotMember, incumbent []s
 			rest = append(rest, cand{key: m.Key, sc: sc})
 			continue
 		}
-		c := cand{key: m.Key, sc: sc, cost: sc.lastRTT}
+		v := cv.of(m.Key)
+		c := cand{key: m.Key, sc: sc, class: v.class, cost: sc.lastRTT}
 		if c.cost == 0 {
 			c.cost = sc.rttMs
 		}
+		if v.class == chainGood {
+			c.cost = v.cost
+		}
 		if wasActive[m.Key] {
 			c.cost = c.cost/nodeStickyRatio - nodeStickyMs
+		}
+		if v.class == chainBad {
+			aliveBad = append(aliveBad, c)
+			continue
 		}
 		alive = append(alive, c)
 	}
 	if !scored {
 		return nil, 0
 	}
-	if len(alive) == 0 {
-		keys := p.pickStableLocked(idx, members, incumbent)
-		return keys, min(xray.SlotBalancerExpected, len(keys))
+	byCost := func(cs []cand) {
+		sort.SliceStable(cs, func(i, j int) bool {
+			if cs[i].class != cs[j].class {
+				return cs[i].class < cs[j].class
+			}
+			if cs[i].cost != cs[j].cost {
+				return cs[i].cost < cs[j].cost
+			}
+			return cs[i].key < cs[j].key
+		})
 	}
-	sort.SliceStable(alive, func(i, j int) bool {
-		if alive[i].cost != alive[j].cost {
-			return alive[i].cost < alive[j].cost
-		}
-		return alive[i].key < alive[j].key
-	})
+	byCost(aliveBad)
+	if len(alive) == 0 {
+		// Nothing alive that might carry the master: the chain-failed live
+		// ones are still better than the dead.
+		alive, aliveBad = aliveBad, nil
+	}
+	if len(alive) == 0 {
+		return p.pickStableLocked(idx, members, incumbent, cv)
+	}
+	byCost(alive)
 	n := min(len(alive), agileActiveMax)
 	out := make([]string, 0, n+1)
 	for _, c := range alive[:n] {
@@ -325,30 +412,104 @@ func (p *nodePicker) pickAgile(idx int, members []xray.SlotMember, incumbent []s
 	return out, n
 }
 
-// pickFor ranks one slot by its strategy, prev being the same pool's last
-// pick (its incumbents). Returns the keys and the active count.
-func (p *nodePicker) pickFor(sl xray.Slot, prev xray.Slot) ([]string, int) {
+// pickFor ranks one slot by its strategy for one master's chain view (nil =
+// the pool's own ranking), prev being that ranking's last pick (its
+// incumbents). Returns the keys and the active count.
+func (p *nodePicker) pickFor(sl xray.Slot, prev xray.MasterPick, cv chainView) ([]string, int) {
 	if sl.Manual() {
 		// The pins are the pick, all active; with no spare the balancer's
 		// fallback is the first pin, so traffic never leaves them.
 		return append([]string(nil), sl.Pinned...), len(sl.Pinned)
 	}
 	if sl.Agile() {
-		return p.pickAgile(sl.Index, sl.Members, prev.Picked, prev.ActiveCount())
+		return p.pickAgile(sl.Index, sl.Members, prev.Picked, prev.ActiveCount(), cv)
 	}
-	keys := p.pick(sl.Index, sl.Members, prev.Picked)
-	return keys, min(xray.SlotBalancerExpected, len(keys))
+	return p.pick(sl.Index, sl.Members, prev.Picked, cv)
 }
 
-// pickSlots sets each slot's pick, prev's picks of the same pool as incumbents.
-func (p *nodePicker) pickSlots(slots, prev []xray.Slot) {
+// pickSlot sets one slot's picks: the pool's own, then each master's from its
+// chain view. A master with no chain verdicts on any member yet, or on a
+// manual pool, follows the pool's pick. prev is the same pool's last state.
+func (p *nodePicker) pickSlot(sl *xray.Slot, prev xray.Slot, chain *chainScores) {
+	sl.Picked, sl.Active = p.pickFor(*sl, xray.MasterPick{Picked: prev.Picked, Active: prev.Active}, nil)
+	sl.MasterPicks = nil
+	if sl.Manual() {
+		return
+	}
+	for _, master := range sl.SlotMasters() {
+		cv := chain.view(master, sl.Members)
+		if len(cv) == 0 {
+			continue
+		}
+		keys, active := p.pickFor(*sl, prev.PickOf(master), cv)
+		if sl.MasterPicks == nil {
+			sl.MasterPicks = map[string]xray.MasterPick{}
+		}
+		sl.MasterPicks[master] = xray.MasterPick{Picked: keys, Active: active}
+	}
+}
+
+// pickSlots sets each slot's picks, prev's picks of the same pool as
+// incumbents.
+func (p *nodePicker) pickSlots(slots, prev []xray.Slot, chain *chainScores) {
 	was := map[string]xray.Slot{}
 	for _, sl := range prev {
 		was[sl.Key] = sl
 	}
 	for i := range slots {
-		slots[i].Picked, slots[i].Active = p.pickFor(slots[i], was[slots[i].Key])
+		p.pickSlot(&slots[i], was[slots[i].Key], chain)
 	}
+}
+
+// poolOrder lists slot idx's members the observatory doesn't see dead, best
+// first by the pool's own ranking (tier, then cost or success rate).
+func (p *nodePicker) poolOrder(idx int, members []xray.SlotMember) []string {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	type cand struct {
+		key  string
+		tier int
+		sc   *nodeScore
+	}
+	var cs []cand
+	for _, m := range members {
+		sc := p.scores[xray.SlotMemberTag(idx, m.Key)]
+		if t := sc.tier(); t != tierDead {
+			cs = append(cs, cand{m.Key, t, sc})
+		}
+	}
+	sort.SliceStable(cs, func(i, j int) bool {
+		a, b := cs[i], cs[j]
+		if a.tier != b.tier {
+			return a.tier < b.tier
+		}
+		if a.tier == tierHealthy {
+			return a.sc.cost() < b.sc.cost()
+		}
+		if a.sc != nil && b.sc != nil && a.sc.ok != b.sc.ok {
+			return a.sc.ok > b.sc.ok
+		}
+		return a.key < b.key
+	})
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.key
+	}
+	return out
+}
+
+// knownDead reports whether member tag failed every ping of the latest poll.
+func (p *nodePicker) knownDead(tag string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sc := p.scores[tag]
+	return sc != nil && sc.sampled && !sc.alive
 }
 
 // wentDown returns the member keys of slot sl that were alive at the previous

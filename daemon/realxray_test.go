@@ -136,6 +136,27 @@ func startHTTP204(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+// startHTTPBytes serves 204 on /generate_204 and n bytes on anything else.
+func startHTTPBytes(t *testing.T, n int) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, n)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/generate_204" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(n))
+		_, _ = w.Write(body)
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return ln.Addr().String()
+}
+
 // startSocks5 runs a minimal no-auth SOCKS5 CONNECT server — a stand-in pool
 // node (members must be real proxies, never freedom). accepted counts the
 // connections it has served.
@@ -160,7 +181,13 @@ func startSocks5(t *testing.T) (port int, accepted func() int64) {
 	return ln.Addr().(*net.TCPAddr).Port, n.Load
 }
 
-func serveSocks5(c net.Conn) {
+func serveSocks5(c net.Conn) { serveSocks5Only(c, nil, 0) }
+
+// serveSocks5Only serves one SOCKS5 CONNECT, refusing destinations whose port
+// allow rejects (nil allows all). With choke > 0 it kills the connection once
+// that many bytes came back — a network that lets a node's connections start
+// and cuts them after a few KB.
+func serveSocks5Only(c net.Conn, allow func(port int) bool, choke int64) {
 	defer c.Close()
 	r := bufio.NewReader(c)
 	hdr := make([]byte, 2)
@@ -206,6 +233,10 @@ func serveSocks5(c net.Conn) {
 	if _, err := io.ReadFull(r, pb); err != nil {
 		return
 	}
+	if allow != nil && !allow(int(binary.BigEndian.Uint16(pb))) {
+		_, _ = c.Write([]byte{5, 2, 0, 1, 0, 0, 0, 0, 0, 0})
+		return
+	}
 	up, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(pb)))), 5*time.Second)
 	if err != nil {
 		_, _ = c.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
@@ -214,6 +245,10 @@ func serveSocks5(c net.Conn) {
 	defer up.Close()
 	_, _ = c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 	go func() { _, _ = io.Copy(up, r) }()
+	if choke > 0 {
+		_, _ = io.CopyN(c, up, choke)
+		return
+	}
 	_, _ = io.Copy(c, up)
 }
 

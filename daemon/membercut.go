@@ -35,10 +35,7 @@ func (s *Supervisor) cutDeadMembers(ctx context.Context, slots []xray.Slot, byTa
 	}
 	var gone, keep []xray.SlotMember
 	for _, sl := range slots {
-		picked := map[string]bool{}
-		for _, k := range sl.Picked {
-			picked[k] = true
-		}
+		picked := sl.PickedKeys()
 		down := map[string]bool{}
 		if sl.Agile() {
 			for _, k := range s.picker.wentDown(sl) {
@@ -80,10 +77,7 @@ func (s *Supervisor) cutUnpinned(old, cur []xray.Slot) {
 		for _, k := range sl.Pinned {
 			now[k] = true
 		}
-		active := map[string]bool{}
-		for _, k := range was.Picked[:was.ActiveCount()] {
-			active[k] = true
-		}
+		active := was.ActiveKeys()
 		for _, m := range was.Members {
 			if active[m.Key] && !now[m.Key] {
 				gone = append(gone, m)

@@ -122,15 +122,15 @@ func (h *nodeHistory) record(slots []xray.Slot, byTag map[string]nodeStatus, par
 		ph.strategy = sl.Strategy
 		ph.auto = sl.Auto
 
-		roles := make(map[string]healthRole, len(sl.Picked))
-		for i, k := range sl.Picked {
-			if i < sl.ActiveCount() {
-				roles[k] = roleActive
-			} else {
-				roles[k] = roleSpare
-			}
+		// Active for any master on the pool beats spare for another.
+		roles := map[string]healthRole{}
+		for k := range sl.PickedKeys() {
+			roles[k] = roleSpare
 		}
-		r := healthRound{at: now, uplinkDown: uplinkDown, ranked: len(sl.Picked) > 0, nodes: make(map[string]nodeSample, len(sl.Members))}
+		for k := range sl.ActiveKeys() {
+			roles[k] = roleActive
+		}
+		r := healthRound{at: now, uplinkDown: uplinkDown, ranked: sl.Ranked(), nodes: make(map[string]nodeSample, len(sl.Members))}
 		for _, m := range sl.Members {
 			s := nodeSample{state: hsUnknown, role: roles[m.Key]}
 			if st, ok := byTag[xray.SlotMemberTag(sl.Index, m.Key)]; ok && st.HealthPing.All > 0 {

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -298,8 +297,16 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 			return // metrics not up yet (first seconds after a start)
 		}
 		events = s.parker.observe(slots, byTag)
-		if s.picker.observe(slots, byTag) {
+		sawLive := s.picker.observe(slots, byTag)
+		if sawLive {
 			repick = s.repicked(slots)
+		}
+		s.netMu.Lock()
+		back := s.uplinkDown && sawLive
+		s.uplinkDown = !sawLive
+		s.netMu.Unlock()
+		if back {
+			s.resetChains("the uplink is back after every node looked dead")
 		}
 		s.history.record(slots, byTag, s.parker.parked())
 		if s.autoSwitched(slots) {
@@ -331,16 +338,26 @@ func (s *Supervisor) PollNodeHealth(ctx context.Context) {
 func (s *Supervisor) repicked(slots []xray.Slot) bool {
 	changed := false
 	for _, sl := range slots {
-		now, active := s.picker.pickFor(sl, sl)
-		if samePick(now, sl.Picked) && active == sl.ActiveCount() {
-			continue
+		now := sl
+		s.picker.pickSlot(&now, sl, s.chain)
+		if !samePick(now.Picked, sl.Picked) || now.ActiveCount() != sl.ActiveCount() {
+			changed = true
+			s.log.Printf("pool %s now uses: %s", sl.Master, s.pickNames(now.Picked[:now.ActiveCount()]))
 		}
-		changed = true
-		names := make([]string, len(now))
-		for i, k := range now {
-			names[i] = s.memberName(k)
+		// Masters on their own chain-probed pick, logged each.
+		for _, master := range sl.SlotMasters() {
+			_, had := sl.MasterPicks[master]
+			_, has := now.MasterPicks[master]
+			if !had && !has {
+				continue
+			}
+			was, is := sl.PickOf(master), now.PickOf(master)
+			if samePick(was.Picked, is.Picked) && was.ActiveCount() == is.ActiveCount() {
+				continue
+			}
+			changed = true
+			s.log.Printf("master %s now uses: %s", master, s.pickNames(is.Picked[:is.ActiveCount()]))
 		}
-		s.log.Printf("pool %s now uses: %s", sl.Master, strings.Join(names, ", "))
 	}
 	return changed
 }

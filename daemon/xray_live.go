@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -63,6 +64,12 @@ func parseLiveConfig(raw []byte) (liveConfig, error) {
 		return liveConfig{}, fmt.Errorf("inbounds: %w", err)
 	}
 	for tag, obj := range lc.inbounds {
+		// A slot inbound's clients are this config's own dialer hops: one
+		// dropped (its master removed or renamed) revokes nothing anyone
+		// outside holds, so it needs no restart.
+		if slotInTagRe.MatchString(tag) {
+			continue
+		}
 		lc.creds[tag] = inboundCredentials(obj)
 	}
 	order, err := taggedObjects(top["outbounds"], lc.outbounds, lc.dialerOf)
@@ -117,6 +124,9 @@ func taggedObjects(raw json.RawMessage, into, dialerOf map[string]string) ([]str
 	}
 	return order, nil
 }
+
+// slotInTagRe matches xray.SlotInTag tags.
+var slotInTagRe = regexp.MustCompile(`^slot[0-9]+-in$`)
 
 // canonicalJSON re-encodes v with object keys sorted (encoding/json sorts map
 // keys), so formatting differences never read as a change.

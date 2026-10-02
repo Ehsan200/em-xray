@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +31,11 @@ type ProbeItem struct {
 	Name        string
 	Fingerprint string // subscription node fingerprint ("" for entries)
 	Outbound    string // raw outbound JSON
+	// Via, when set, is a pool member's outbound JSON the item is chained
+	// through: Outbound (a master) dials its server through Via, as the live
+	// config's dialerProxy hop does, so the probe measures the path the
+	// master's traffic really takes.
+	Via string
 }
 
 // ProbeResult is one measurement. LatencyMs is meaningful only when Err is nil.
@@ -39,6 +45,9 @@ type ProbeResult struct {
 	Fingerprint string
 	LatencyMs   int
 	Err         error
+	// Passed is how many of the ProbeOptions.Attempts requests succeeded;
+	// Err is set only when none did, LatencyMs is the fastest success.
+	Passed int
 }
 
 // ProbeOptions carries the OS-specific bits a probe run needs.
@@ -50,6 +59,12 @@ type ProbeOptions struct {
 	Timeout  time.Duration // per-probe HTTP timeout; 0 => DefaultProbeTimeout
 	Batch    int           // configs per xray instance; 0 => defaultProbeBatch
 	Parallel int           // concurrent probes; 0 => defaultProbeParallel
+	Attempts int           // requests per item, each on a new connection; 0 => 1
+	// MinBytes, when set, makes a probe read the response body and fail
+	// unless at least this many bytes arrive within Timeout. Some networks
+	// let a connection through a node start and kill it after a few KB, so
+	// a tiny reply proves nothing about carrying real traffic.
+	MinBytes int64
 }
 
 func (o ProbeOptions) url() string {
@@ -98,6 +113,12 @@ func ProbeOutbounds(ctx context.Context, items []ProbeItem, opts ProbeOptions) [
 			out[i].Err = fmt.Errorf("bad outbound json: %w", err)
 			continue
 		}
+		if it.Via != "" {
+			if err := json.Unmarshal([]byte(it.Via), &m); err != nil {
+				out[i].Err = fmt.Errorf("bad via outbound json: %w", err)
+				continue
+			}
+		}
 		idx = append(idx, i)
 	}
 
@@ -124,7 +145,7 @@ func planProbeBatches(items []ProbeItem, idx []int, size int) [][]int {
 	var batches [][]int
 	var seen []map[string]bool // per batch: hysteria endpoints already in it
 	for _, i := range idx {
-		ep := hysteriaEndpoint(items[i].Outbound)
+		ep := probeHysteriaEndpoint(items[i])
 		placed := false
 		for b := range batches {
 			if len(batches[b]) < size && (ep == "" || !seen[b][ep]) {
@@ -145,6 +166,15 @@ func planProbeBatches(items []ProbeItem, idx []int, size int) [][]int {
 		}
 	}
 	return batches
+}
+
+// probeHysteriaEndpoint is the hysteria endpoint an item dials first: its Via
+// when chained (the master then rides inside it), else its own outbound.
+func probeHysteriaEndpoint(it ProbeItem) string {
+	if it.Via != "" {
+		return hysteriaEndpoint(it.Via)
+	}
+	return hysteriaEndpoint(it.Outbound)
 }
 
 // hysteriaEndpoint returns "address:port" for a hysteria outbound, "" otherwise.
@@ -248,8 +278,22 @@ func runProbeBatch(ctx context.Context, items []ProbeItem, idx []int, out []Prob
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			ms, err := probeThrough(runCtx, port, opts)
-			out[slot].LatencyMs, out[slot].Err = ms, err
+			attempts := max(opts.Attempts, 1)
+			var lastErr error
+			for range attempts {
+				ms, err := probeThrough(runCtx, port, opts)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if out[slot].Passed == 0 || ms < out[slot].LatencyMs {
+					out[slot].LatencyMs = ms
+				}
+				out[slot].Passed++
+			}
+			if out[slot].Passed == 0 {
+				out[slot].Err = lastErr
+			}
 		}(ports[i], j)
 	}
 	wg.Wait()
@@ -282,8 +326,19 @@ func BuildProbeConfig(items []ProbeItem, ports []int) ([]byte, error) {
 			return nil, fmt.Errorf("%s: %w", it.Name, err)
 		}
 		// A master's pool wiring is a property of the live config, not of the
-		// server this outbound describes — probe the server itself.
+		// server this outbound describes — probe the server itself, or
+		// through the one member the item names.
 		stripDialerProxy(ob)
+		if it.Via != "" {
+			viaTag := fmt.Sprintf("probe-via-%d", i)
+			via, err := entryOutbound(it.Via, viaTag)
+			if err != nil {
+				return nil, fmt.Errorf("%s via: %w", it.Name, err)
+			}
+			stripDialerProxy(via)
+			setDialerProxy(ob, viaTag)
+			outbounds = append(outbounds, via)
+		}
 		outbounds = append(outbounds, ob)
 		rules = append(rules, map[string]any{
 			"type": "field", "inboundTag": []any{inTag}, "outboundTag": outTag,
@@ -353,6 +408,16 @@ func probeThrough(ctx context.Context, port int, opts ProbeOptions) (int, error)
 	}
 	if resp.StatusCode >= 400 {
 		return 0, fmt.Errorf("http %d", resp.StatusCode)
+	}
+	if opts.MinBytes > 0 {
+		n, err := io.Copy(io.Discard, io.LimitReader(resp.Body, opts.MinBytes))
+		if n < opts.MinBytes {
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, fmt.Errorf("stalled after %d KB: %w", n>>10, probeErr(err))
+		}
+		ms = int(time.Since(start).Milliseconds())
 	}
 	return ms, nil
 }
