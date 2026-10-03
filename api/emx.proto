@@ -32,6 +32,7 @@ service Daemon {
   rpc EntryGetConfig(IdRequest) returns (ConfigReply);     // raw outbound JSON
   rpc EntrySetConfig(SetConfigRequest) returns (EntryReply);
   rpc EntrySetMux(SetEnabledRequest) returns (EntryReply);  // per-entry mux.cool opt-in
+  rpc EntrySetDialer(EntryDialerRequest) returns (EntryReply); // set/clear a master's dialer refs
 
   // Inbounds (server listeners routed to a target).
   rpc InboundAdd(InboundAddRequest) returns (InboundReply);
@@ -270,6 +271,14 @@ message DuplicateRequest {
 // ConfigReply carries a config as pretty-printed JSON for editing.
 message ConfigReply { string json = 1; }
 // SetConfigRequest replaces a config from edited JSON.
+// EntryDialerRequest replaces an entry's dialer: comma-separated typed refs
+// (xraysub:NAME,xray:NAME,…). Several refs merge into one pool. Empty = no
+// dialer (the entry stops being a master).
+message EntryDialerRequest {
+  uint32 id = 1;
+  string dialer = 2;
+}
+
 message SetConfigRequest {
   uint32 id = 1;
   string json = 2;

@@ -83,6 +83,25 @@ func ParseDialer(s string) ([]DialerRef, error) {
 	return refs, nil
 }
 
+// CanonicalDialer parses a Dialer string and returns it re-joined in canonical
+// form: names normalized, duplicate refs dropped, order kept. "" stays "".
+func CanonicalDialer(s string) (string, error) {
+	refs, err := ParseDialer(s)
+	if err != nil {
+		return "", err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range refs {
+		k := r.Kind + ":" + NormalizeName(r.Name)
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return strings.Join(out, ","), nil
+}
+
 // DetectDialerCycle reports an error if making entry `name` a master with the
 // given dialer would route its transport through itself, directly or
 // transitively. Only xray: refs can form a loop (xraysub:/proxy: are leaves).

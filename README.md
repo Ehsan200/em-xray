@@ -252,9 +252,17 @@ emx sub test <id> [fingerprint]             real latency per node (persisted)
 
 emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>] [--mux]
 emx entry mux <id> on|off                   multiplex streams over a few tunnels (per entry)
+emx entry dialer <id> [refs…] [--add R] [--rm R] [--clear]   show / change a master's dialer
 emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
 emx entry test [id]
 ```
+
+A master's dialer can name several subscriptions and entries (`--dialer
+"xraysub:nap,xraysub:backup,xray:my-vps"`, or check them in the TUI's Entries → master → Dialer
+list). They merge into one pool: the master's balancer picks across every node of every ref, so a
+dead or empty subscription doesn't take the master down. `emx entry dialer 3 --add xraysub:backup`
+edits an existing master live; `--clear` turns it back into a plain entry (refused while an inbound
+targets it as `master:NAME`).
 
 Renaming an entry or subscription updates everything bound to its name in one step: masters'
 dialer refs (`xray:NAME`, `xraysub:NAME`), inbound targets (`master:NAME`, `xray:NAME`) and the

@@ -137,6 +137,50 @@ func (s *Server) EntrySetConfig(ctx context.Context, req *emxv1.SetConfigRequest
 	return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
 }
 
+// EntrySetDialer replaces an entry's dialer refs. Several refs (subscriptions
+// and/or entries) merge into one pool for the master. An empty dialer turns a
+// master back into a plain entry, refused while an inbound still targets it as
+// master:NAME.
+func (s *Server) EntrySetDialer(ctx context.Context, req *emxv1.EntryDialerRequest) (*emxv1.EntryReply, error) {
+	e, err := s.store.GetEntry(uint(req.Id))
+	if err != nil {
+		return nil, err
+	}
+	dialer, err := xray.CanonicalDialer(req.Dialer)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateDialer(dialer, e.Name); err != nil {
+		return nil, err
+	}
+	if dialer != "" {
+		if err := xray.CheckMasterOutbound(e.Outbound); err != nil {
+			return nil, err
+		}
+	} else if e.IsMaster() {
+		ins, err := s.store.ListInbounds()
+		if err != nil {
+			return nil, err
+		}
+		for _, in := range ins {
+			if kind, name, _ := xray.ParseTarget(in.Target); kind == xray.KindMaster && xray.NormalizeName(name) == e.Name {
+				return nil, fmt.Errorf("inbound %q targets master:%s — retarget it first (or to xray:%s)", in.Name, e.Name, e.Name)
+			}
+		}
+	}
+	if dialer == e.Dialer {
+		return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
+	}
+	e.Dialer = dialer
+	if err := s.store.UpdateEntry(e); err != nil {
+		return nil, err
+	}
+	if err := s.sup.Reconcile(); err != nil {
+		return nil, fmt.Errorf("saved, but reconcile failed: %w", err)
+	}
+	return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
+}
+
 // validateDialer rejects a master whose dialer is malformed, references a
 // missing entry/subscription, or would form a cycle. selfName is the entry being
 // added/edited (treated as already stored for cycle purposes).

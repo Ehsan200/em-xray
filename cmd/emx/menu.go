@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -986,9 +987,9 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 	i, ok := runSelect(fmt.Sprintf("%s (%s)", e.Name, kind), []selectItem{
 		{"Test", "measure real latency through this outbound"},
 		{"Rename", ""}, {"Duplicate", ""}, {"Edit JSON", ""}, {"Remove", ""},
-		{"Toggle mux", muxDesc}, {"← Back", ""},
+		{"Toggle mux", muxDesc}, {"Dialer", dialerDesc(e)}, {"← Back", ""},
 	})
-	if !ok || i == 6 {
+	if !ok || i == 7 {
 		return
 	}
 	switch i {
@@ -1047,6 +1048,20 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 		} else {
 			notify("%s: mux %s", e.Name, muxLabel(reply.Entry))
 		}
+	case 6:
+		s.entrySetDialer(e)
+	}
+}
+
+// dialerDesc summarizes an entry's dialer for the actions menu.
+func dialerDesc(e *emxv1.EntryInfo) string {
+	switch n := len(splitRefs(e.Dialer)); n {
+	case 0:
+		return "none — pick subscriptions/entries to make it a master"
+	case 1:
+		return e.Dialer
+	default:
+		return fmt.Sprintf("%d refs, one pool: %s", n, e.Dialer)
 	}
 }
 
@@ -1110,8 +1125,8 @@ func (s *menuSession) entryAdd() {
 	}
 	// Optionally make it a master by choosing a dialer.
 	dialer := ""
-	if confirm("Make this a master (route through a subscription/entry)?") {
-		dialer = s.pickDialer()
+	if confirm("Make this a master (route through subscriptions/entries)?") {
+		dialer, _ = s.pickDialer("", name)
 	}
 	ctx, cancel := call()
 	reply, err := s.c.EntryAdd(ctx, &emxv1.EntryAddRequest{Name: name, Link: link, Dialer: dialer})
@@ -1127,28 +1142,95 @@ func (s *menuSession) entryAdd() {
 	notify("added %s %q", kind, reply.Entry.Name)
 }
 
-// pickDialer builds a dialer ref by selecting a subscription or entry.
-func (s *menuSession) pickDialer() string {
+// pickDialer lets the user check any number of subscriptions and entries as
+// the master's dialer; all checked refs feed one pool. cur pre-checks the
+// existing refs, self (the master being edited) is left out. ok=false if
+// cancelled or nothing is available.
+func (s *menuSession) pickDialer(cur, self string) (string, bool) {
 	ctx, cancel := call()
 	subs, _ := s.c.SubList(ctx, &emxv1.Empty{})
+	entries, _ := s.c.EntryList(ctx, &emxv1.Empty{})
 	cancel()
 	var items []selectItem
 	var refs []string
 	if subs != nil {
 		for _, sub := range subs.Subs {
-			items = append(items, selectItem{label: "xraysub:" + sub.Name, desc: fmt.Sprintf("%d active nodes", sub.ActiveCount)})
+			items = append(items, selectItem{label: "xraysub:" + sub.Name, desc: fmt.Sprintf("subscription · %d active nodes", sub.ActiveCount)})
 			refs = append(refs, "xraysub:"+sub.Name)
 		}
 	}
+	if entries != nil {
+		for _, e := range entries.Entries {
+			if e.Name == self {
+				continue
+			}
+			desc := "entry"
+			if e.Protocol != "" {
+				desc += " · " + e.Protocol
+			}
+			if e.IsMaster {
+				desc += " · master → " + e.Dialer
+			}
+			items = append(items, selectItem{label: "xray:" + e.Name, desc: desc})
+			refs = append(refs, "xray:"+e.Name)
+		}
+	}
+	// Keep refs the lists don't know (e.g. a ref the daemon will reject) visible
+	// so saving doesn't drop them silently.
+	have := splitRefs(cur)
+	for _, r := range have {
+		if !slices.Contains(refs, r) {
+			items = append(items, selectItem{label: r, desc: "not found"})
+			refs = append(refs, r)
+		}
+	}
 	if len(items) == 0 {
-		notify("no subscriptions yet — add one first")
-		return ""
+		notify("no subscriptions or entries yet — add one first")
+		return "", false
 	}
-	i, ok := runSelect("Route through", items)
+	checked := make([]bool, len(refs))
+	for i, r := range refs {
+		checked[i] = slices.Contains(have, r)
+	}
+	st, ok := runMultiSelect("Route through (check one or more — they merge into one pool)", items, checked)
 	if !ok {
-		return ""
+		return "", false
 	}
-	return refs[i]
+	// Existing refs keep their order; newly checked ones follow.
+	var out []string
+	for _, r := range have {
+		if st[slices.Index(refs, r)] {
+			out = append(out, r)
+		}
+	}
+	for i, r := range refs {
+		if st[i] && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return strings.Join(out, ","), true
+}
+
+// entrySetDialer changes (or clears) an entry's dialer from the checklist.
+func (s *menuSession) entrySetDialer(e *emxv1.EntryInfo) {
+	dialer, ok := s.pickDialer(e.Dialer, e.Name)
+	if !ok || dialer == e.Dialer {
+		return
+	}
+	if dialer == "" && !confirm("Nothing checked — make "+e.Name+" a plain entry (no dialer)?") {
+		return
+	}
+	ctx, cancel := call()
+	reply, err := s.c.EntrySetDialer(ctx, &emxv1.EntryDialerRequest{Id: e.Id, Dialer: dialer})
+	cancel()
+	switch {
+	case err != nil:
+		notify("error: %v", err)
+	case reply.Entry.Dialer == "":
+		notify("%s is now a plain entry", reply.Entry.Name)
+	default:
+		notify("%s → %s", reply.Entry.Name, reply.Entry.Dialer)
+	}
 }
 
 // ---- read-only views -------------------------------------------------------

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -18,7 +20,7 @@ func entryCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "entry") },
 	}
 	c.AddCommand(entryAddCmd(), entryListCmd(), entryRemoveCmd(), entryRenameCmd(),
-		entryDuplicateCmd(), entryEditCmd(), entryTestCmd(), entryMuxCmd())
+		entryDuplicateCmd(), entryEditCmd(), entryTestCmd(), entryMuxCmd(), entryDialerCmd())
 	return c
 }
 
@@ -238,6 +240,121 @@ func entryMuxCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+func entryDialerCmd() *cobra.Command {
+	var add, rm []string
+	var clear bool
+	c := &cobra.Command{
+		Use:   "dialer <id> [refs...]",
+		Short: "show or change a master's dialer (several subs/entries merge into one pool)",
+		Long: "Without refs or flags, prints the entry's dialer refs. Refs replace the\n" +
+			"dialer; --add/--rm edit it in place; --clear turns a master back into a\n" +
+			"plain entry. Every ref is xraysub:NAME (a subscription's nodes) or\n" +
+			"xray:NAME (one entry). All refs feed one pool the master's balancer picks\n" +
+			"from, so a dead subscription doesn't take the master down.\n\n" +
+			"  emx entry dialer 3 xraysub:nap xraysub:backup\n" +
+			"  emx entry dialer 3 --add xray:my-vps\n" +
+			"  emx entry dialer 3 --rm xraysub:nap",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				list, err := cl.EntryList(ctx, &emxv1.Empty{})
+				if err != nil {
+					return err
+				}
+				var cur *emxv1.EntryInfo
+				for _, e := range list.Entries {
+					if e.Id == id {
+						cur = e
+					}
+				}
+				if cur == nil {
+					return fmt.Errorf("no entry with id %d", id)
+				}
+				out := cmd.OutOrStdout()
+				if len(args) == 1 && len(add) == 0 && len(rm) == 0 && !clear {
+					refs := splitRefs(cur.Dialer)
+					if len(refs) == 0 {
+						fmt.Fprintf(out, "%s: no dialer (plain entry)\n", cur.Name)
+					}
+					for _, r := range refs {
+						fmt.Fprintln(out, r)
+					}
+					return nil
+				}
+				dialer, err := editDialer(cur.Dialer, args[1:], add, rm, clear)
+				if err != nil {
+					return err
+				}
+				reply, err := cl.EntrySetDialer(ctx, &emxv1.EntryDialerRequest{Id: id, Dialer: dialer})
+				if err != nil {
+					return err
+				}
+				if reply.Entry.Dialer == "" {
+					fmt.Fprintf(out, "%s: no dialer (plain entry)\n", reply.Entry.Name)
+				} else {
+					fmt.Fprintf(out, "%s: dialer %s\n", reply.Entry.Name, reply.Entry.Dialer)
+				}
+				return nil
+			})
+		},
+	}
+	c.Flags().StringArrayVar(&add, "add", nil, "add a ref (xraysub:NAME or xray:NAME); repeatable")
+	c.Flags().StringArrayVar(&rm, "rm", nil, "remove a ref; repeatable")
+	c.Flags().BoolVar(&clear, "clear", false, "remove every ref (the entry stops being a master)")
+	return c
+}
+
+// splitRefs splits a comma-separated dialer into trimmed, non-empty refs.
+func splitRefs(dialer string) []string {
+	var out []string
+	for _, r := range strings.Split(dialer, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// editDialer computes a new dialer from the current one: set (if non-empty)
+// replaces it, clear empties it, then rm drops and add appends refs. Each
+// argument may itself be a comma list. Duplicates are dropped; removing a ref
+// that isn't there is an error so a typo doesn't pass silently.
+func editDialer(cur string, set, add, rm []string, clear bool) (string, error) {
+	if clear && len(set) > 0 {
+		return "", fmt.Errorf("--clear and refs are exclusive")
+	}
+	refs := splitRefs(cur)
+	if clear {
+		refs = nil
+	}
+	if len(set) > 0 {
+		refs = splitRefs(strings.Join(set, ","))
+	}
+	for _, r := range splitRefs(strings.Join(rm, ",")) {
+		i := slices.Index(refs, r)
+		if i < 0 {
+			return "", fmt.Errorf("dialer has no ref %q (have: %s)", r, strings.Join(refs, ", "))
+		}
+		refs = append(refs[:i], refs[i+1:]...)
+	}
+	for _, r := range splitRefs(strings.Join(add, ",")) {
+		if slices.Index(refs, r) < 0 {
+			refs = append(refs, r)
+		}
+	}
+	var out []string
+	for _, r := range refs {
+		if slices.Index(out, r) < 0 {
+			out = append(out, r)
+		}
+	}
+	return strings.Join(out, ","), nil
 }
 
 // muxLabel renders an entry's mux state: on/off, or why it can't apply.

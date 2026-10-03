@@ -106,6 +106,83 @@ func runSelectStrings(title string, labels ...string) (int, bool) {
 	return runSelect(title, items)
 }
 
+// ---- multi-select prompt ---------------------------------------------------
+
+type checkModel struct {
+	title   string
+	items   []selectItem
+	checked []bool
+	cursor  int
+	ok      bool
+	done    bool
+}
+
+func (m checkModel) Init() tea.Cmd { return nil }
+
+func (m checkModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.items)-1 {
+				m.cursor++
+			}
+		case " ", "x":
+			m.checked[m.cursor] = !m.checked[m.cursor]
+		case "enter":
+			m.ok, m.done = true, true
+			return m, tea.Quit
+		case "q", "esc", "ctrl+c":
+			m.done = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m checkModel) View() string {
+	if m.done {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(styleTitle.Render(m.title) + "\n\n")
+	for i, it := range m.items {
+		cursor := "  "
+		box := "[ ] "
+		if m.checked[i] {
+			box = "[x] "
+		}
+		label := box + it.label
+		if i == m.cursor {
+			cursor = styleCursor.Render("❯ ")
+			label = styleSelected.Render(label)
+		}
+		b.WriteString(cursor + label)
+		if it.desc != "" {
+			b.WriteString("  " + styleDim.Render(it.desc))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n" + styleHint.Render("↑/↓ move · space toggle · enter confirm · esc cancel"))
+	return b.String()
+}
+
+// runMultiSelect shows a checklist (checked = initial state) and returns the
+// final state, or ok=false if cancelled.
+func runMultiSelect(title string, items []selectItem, checked []bool) ([]bool, bool) {
+	st := make([]bool, len(items))
+	copy(st, checked)
+	m, err := tea.NewProgram(checkModel{title: title, items: items, checked: st}).Run()
+	if err != nil {
+		return nil, false
+	}
+	cm := m.(checkModel)
+	return cm.checked, cm.ok
+}
+
 // ---- text input prompt -----------------------------------------------------
 
 type inputModel struct {
