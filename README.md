@@ -252,17 +252,24 @@ emx sub test <id> [fingerprint]             real latency per node (persisted)
 
 emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>] [--mux]
 emx entry mux <id> on|off                   multiplex streams over a few tunnels (per entry)
-emx entry dialer <id> [refs…] [--add R] [--rm R] [--clear]   show / change a master's dialer
+emx entry dialer <id|ids|masters|all> [refs…] [--add R] [--rm R] [--clear]   show / change dialers
 emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
 emx entry test [id]
 ```
 
-A master's dialer can name several subscriptions and entries (`--dialer
-"xraysub:nap,xraysub:backup,xray:my-vps"`, or check them in the TUI's Entries → master → Dialer
+A master's dialer can name several subscriptions and entries (e.g. `--dialer
+"xraysub:mysub,xraysub:backup,xray:my-vps"`, or check them in the TUI's Entries → master → Dialer
 list). They merge into one pool: the master's balancer picks across every node of every ref, so a
 dead or empty subscription doesn't take the master down. `emx entry dialer 3 --add xraysub:backup`
 edits an existing master live; `--clear` turns it back into a plain entry (refused while an inbound
 targets it as `master:NAME`).
+
+Several at once: `emx entry dialer 3,5,7 --add xraysub:backup`, `emx entry dialer masters --rm
+xraysub:mysub` (`--rm` skips entries without that ref), or TUI Entries → ⇄ Bulk change dialers (check
+entries, pick add / remove / replace / clear, check refs, confirm the preview). The batch is
+validated as a whole — including cycles between the edited entries — and nothing is written if any
+entry is refused; otherwise all of it applies in one live reconcile. (Names and ids above are
+examples.)
 
 Renaming an entry or subscription updates everything bound to its name in one step: masters'
 dialer refs (`xray:NAME`, `xraysub:NAME`), inbound targets (`master:NAME`, `xray:NAME`) and the

@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	emxv1 "github.com/ehsan200/em-xray/api/emxv1"
+)
 
 func TestEditDialer(t *testing.T) {
 	cases := []struct {
@@ -25,5 +29,37 @@ func TestEditDialer(t *testing.T) {
 		if (err != nil) != c.wantErr || got != c.want {
 			t.Errorf("%s: got %q, %v; want %q, err=%v", c.name, got, err, c.want, c.wantErr)
 		}
+	}
+}
+
+func TestBulkDialerEdit(t *testing.T) {
+	entries := []*emxv1.EntryInfo{
+		{Id: 1, Name: "a", IsMaster: true, Dialer: "xraysub:x,xraysub:y"},
+		{Id: 2, Name: "b", IsMaster: true, Dialer: "xraysub:x"},
+		{Id: 3, Name: "c"},
+	}
+	if sel, err := selectEntries(entries, "masters"); err != nil || len(sel) != 2 {
+		t.Fatalf("masters: %v %v", sel, err)
+	}
+	if sel, err := selectEntries(entries, "3,1,3"); err != nil || len(sel) != 2 || sel[0].Id != 3 {
+		t.Fatalf("ids: %v %v", sel, err)
+	}
+	if _, err := selectEntries(entries, "9"); err == nil {
+		t.Fatal("unknown id accepted")
+	}
+
+	// --rm skips entries without the ref; --add appends everywhere.
+	items, err := editDialers(entries, nil, []string{"xray:z"}, []string{"xraysub:y"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"xraysub:x,xray:z", "xraysub:x,xray:z", "xray:z"}
+	for i, it := range items {
+		if it.Dialer != want[i] {
+			t.Errorf("item %d = %q, want %q", i, it.Dialer, want[i])
+		}
+	}
+	if _, err := editDialers(entries, nil, nil, []string{"xraysub:typo"}, false); err == nil {
+		t.Fatal("ref on no selected entry accepted")
 	}
 }

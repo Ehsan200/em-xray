@@ -33,6 +33,7 @@ service Daemon {
   rpc EntrySetConfig(SetConfigRequest) returns (EntryReply);
   rpc EntrySetMux(SetEnabledRequest) returns (EntryReply);  // per-entry mux.cool opt-in
   rpc EntrySetDialer(EntryDialerRequest) returns (EntryReply); // set/clear a master's dialer refs
+  rpc EntryBulkDialer(EntryBulkDialerRequest) returns (EntryListReply); // several at once, one apply
 
   // Inbounds (server listeners routed to a target).
   rpc InboundAdd(InboundAddRequest) returns (InboundReply);
@@ -277,6 +278,13 @@ message ConfigReply { string json = 1; }
 message EntryDialerRequest {
   uint32 id = 1;
   string dialer = 2;
+}
+
+// EntryBulkDialerRequest sets several entries' dialers at once: all are
+// validated together (none is written if any is refused) and applied in one
+// reconcile. The reply lists the changed entries.
+message EntryBulkDialerRequest {
+  repeated EntryDialerRequest items = 1;
 }
 
 message SetConfigRequest {

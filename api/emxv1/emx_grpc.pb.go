@@ -39,6 +39,7 @@ const (
 	Daemon_EntrySetConfig_FullMethodName        = "/emx.v1.Daemon/EntrySetConfig"
 	Daemon_EntrySetMux_FullMethodName           = "/emx.v1.Daemon/EntrySetMux"
 	Daemon_EntrySetDialer_FullMethodName        = "/emx.v1.Daemon/EntrySetDialer"
+	Daemon_EntryBulkDialer_FullMethodName       = "/emx.v1.Daemon/EntryBulkDialer"
 	Daemon_InboundAdd_FullMethodName            = "/emx.v1.Daemon/InboundAdd"
 	Daemon_InboundList_FullMethodName           = "/emx.v1.Daemon/InboundList"
 	Daemon_InboundRemove_FullMethodName         = "/emx.v1.Daemon/InboundRemove"
@@ -100,6 +101,7 @@ type DaemonClient interface {
 	EntrySetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*EntryReply, error)
 	EntrySetMux(ctx context.Context, in *SetEnabledRequest, opts ...grpc.CallOption) (*EntryReply, error)
 	EntrySetDialer(ctx context.Context, in *EntryDialerRequest, opts ...grpc.CallOption) (*EntryReply, error)
+	EntryBulkDialer(ctx context.Context, in *EntryBulkDialerRequest, opts ...grpc.CallOption) (*EntryListReply, error)
 	// Inbounds (server listeners routed to a target).
 	InboundAdd(ctx context.Context, in *InboundAddRequest, opts ...grpc.CallOption) (*InboundReply, error)
 	InboundList(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*InboundListReply, error)
@@ -342,6 +344,16 @@ func (c *daemonClient) EntrySetDialer(ctx context.Context, in *EntryDialerReques
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EntryReply)
 	err := c.cc.Invoke(ctx, Daemon_EntrySetDialer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonClient) EntryBulkDialer(ctx context.Context, in *EntryBulkDialerRequest, opts ...grpc.CallOption) (*EntryListReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EntryListReply)
+	err := c.cc.Invoke(ctx, Daemon_EntryBulkDialer_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -668,6 +680,7 @@ type DaemonServer interface {
 	EntrySetConfig(context.Context, *SetConfigRequest) (*EntryReply, error)
 	EntrySetMux(context.Context, *SetEnabledRequest) (*EntryReply, error)
 	EntrySetDialer(context.Context, *EntryDialerRequest) (*EntryReply, error)
+	EntryBulkDialer(context.Context, *EntryBulkDialerRequest) (*EntryListReply, error)
 	// Inbounds (server listeners routed to a target).
 	InboundAdd(context.Context, *InboundAddRequest) (*InboundReply, error)
 	InboundList(context.Context, *Empty) (*InboundListReply, error)
@@ -775,6 +788,9 @@ func (UnimplementedDaemonServer) EntrySetMux(context.Context, *SetEnabledRequest
 }
 func (UnimplementedDaemonServer) EntrySetDialer(context.Context, *EntryDialerRequest) (*EntryReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method EntrySetDialer not implemented")
+}
+func (UnimplementedDaemonServer) EntryBulkDialer(context.Context, *EntryBulkDialerRequest) (*EntryListReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method EntryBulkDialer not implemented")
 }
 func (UnimplementedDaemonServer) InboundAdd(context.Context, *InboundAddRequest) (*InboundReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method InboundAdd not implemented")
@@ -1240,6 +1256,24 @@ func _Daemon_EntrySetDialer_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServer).EntrySetDialer(ctx, req.(*EntryDialerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Daemon_EntryBulkDialer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EntryBulkDialerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServer).EntryBulkDialer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Daemon_EntryBulkDialer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServer).EntryBulkDialer(ctx, req.(*EntryBulkDialerRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1852,6 +1886,10 @@ var Daemon_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EntrySetDialer",
 			Handler:    _Daemon_EntrySetDialer_Handler,
+		},
+		{
+			MethodName: "EntryBulkDialer",
+			Handler:    _Daemon_EntryBulkDialer_Handler,
 		},
 		{
 			MethodName: "InboundAdd",

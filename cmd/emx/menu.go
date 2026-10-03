@@ -940,7 +940,8 @@ func (s *menuSession) entriesMenu() {
 		}
 		n := len(reply.Entries)
 		if n > 0 {
-			items = append(items, selectItem{label: "⚡ Test all entries", desc: "real latency through every entry"})
+			items = append(items, selectItem{label: "⚡ Test all entries", desc: "real latency through every entry"},
+				selectItem{label: "⇄ Bulk change dialers", desc: "add/remove/replace dialer refs on several entries at once"})
 		}
 		items = append(items, selectItem{label: "+ Add entry / master"},
 			selectItem{label: "+ Add Cloudflare WARP", desc: "free WARP account, registered for you — exit IP is Cloudflare's"},
@@ -956,6 +957,8 @@ func (s *menuSession) entriesMenu() {
 			s.entryAdd()
 		case i == n:
 			s.testEntries()
+		case i == n+1:
+			s.bulkDialer(reply.Entries)
 		default:
 			s.entryActions(reply.Entries[i])
 		}
@@ -1142,11 +1145,10 @@ func (s *menuSession) entryAdd() {
 	notify("added %s %q", kind, reply.Entry.Name)
 }
 
-// pickDialer lets the user check any number of subscriptions and entries as
-// the master's dialer; all checked refs feed one pool. cur pre-checks the
-// existing refs, self (the master being edited) is left out. ok=false if
-// cancelled or nothing is available.
-func (s *menuSession) pickDialer(cur, self string) (string, bool) {
+// dialerCandidates lists every subscription and entry a dialer can name, as
+// checklist items and their refs. Entries named in skip are left out (a
+// master can't route through itself).
+func (s *menuSession) dialerCandidates(skip ...string) ([]selectItem, []string) {
 	ctx, cancel := call()
 	subs, _ := s.c.SubList(ctx, &emxv1.Empty{})
 	entries, _ := s.c.EntryList(ctx, &emxv1.Empty{})
@@ -1161,7 +1163,7 @@ func (s *menuSession) pickDialer(cur, self string) (string, bool) {
 	}
 	if entries != nil {
 		for _, e := range entries.Entries {
-			if e.Name == self {
+			if slices.Contains(skip, e.Name) {
 				continue
 			}
 			desc := "entry"
@@ -1175,6 +1177,15 @@ func (s *menuSession) pickDialer(cur, self string) (string, bool) {
 			refs = append(refs, "xray:"+e.Name)
 		}
 	}
+	return items, refs
+}
+
+// pickDialer lets the user check any number of subscriptions and entries as
+// the master's dialer; all checked refs feed one pool. cur pre-checks the
+// existing refs, self (the master being edited) is left out. ok=false if
+// cancelled or nothing is available.
+func (s *menuSession) pickDialer(cur, self string) (string, bool) {
+	items, refs := s.dialerCandidates(self)
 	// Keep refs the lists don't know (e.g. a ref the daemon will reject) visible
 	// so saving doesn't drop them silently.
 	have := splitRefs(cur)
@@ -1209,6 +1220,122 @@ func (s *menuSession) pickDialer(cur, self string) (string, bool) {
 		}
 	}
 	return strings.Join(out, ","), true
+}
+
+// bulkDialer changes the dialers of several entries at once: check the
+// entries, pick an edit (add / remove / replace / clear), check the refs,
+// confirm. The daemon validates all of them together and applies once.
+func (s *menuSession) bulkDialer(entries []*emxv1.EntryInfo) {
+	items := make([]selectItem, len(entries))
+	checked := make([]bool, len(entries))
+	for i, e := range entries {
+		desc := "plain entry"
+		if e.IsMaster {
+			desc = "master → " + e.Dialer
+		}
+		items[i] = selectItem{label: e.Name, desc: desc}
+		checked[i] = e.IsMaster
+	}
+	st, ok := runMultiSelect("Entries to change (masters pre-checked)", items, checked)
+	if !ok {
+		return
+	}
+	var sel []*emxv1.EntryInfo
+	var names []string
+	for i, on := range st {
+		if on {
+			sel = append(sel, entries[i])
+			names = append(names, entries[i].Name)
+		}
+	}
+	if len(sel) == 0 {
+		notify("no entries checked")
+		return
+	}
+	mode, ok := runSelect(fmt.Sprintf("%d entries — change their dialers how?", len(sel)), []selectItem{
+		{"Add refs", "keep each one's refs, add the checked ones"},
+		{"Remove refs", "drop the checked refs wherever they appear"},
+		{"Replace with", "every entry gets exactly the checked refs"},
+		{"Clear", "no dialer — they become plain entries"},
+		{"← Back", ""},
+	})
+	if !ok || mode == 4 {
+		return
+	}
+	var picked []string
+	if mode != 3 {
+		var refItems []selectItem
+		var refs []string
+		if mode == 1 { // only refs the selection actually has
+			for _, e := range sel {
+				for _, r := range splitRefs(e.Dialer) {
+					if !slices.Contains(refs, r) {
+						refs = append(refs, r)
+						refItems = append(refItems, selectItem{label: r})
+					}
+				}
+			}
+		} else {
+			refItems, refs = s.dialerCandidates(names...)
+		}
+		if len(refs) == 0 {
+			notify("nothing to pick from")
+			return
+		}
+		rs, ok := runMultiSelect("Refs", refItems, nil)
+		if !ok {
+			return
+		}
+		for i, on := range rs {
+			if on {
+				picked = append(picked, refs[i])
+			}
+		}
+		if len(picked) == 0 {
+			notify("no refs checked")
+			return
+		}
+	}
+	var set, add, rm []string
+	switch mode {
+	case 0:
+		add = picked
+	case 1:
+		rm = picked
+	case 2:
+		set = picked
+	}
+	reqs, err := editDialers(sel, set, add, rm, mode == 3)
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	var preview []string
+	for i, r := range reqs {
+		if r.Dialer != sel[i].Dialer {
+			d := r.Dialer
+			if d == "" {
+				d = "(none)"
+			}
+			preview = append(preview, fmt.Sprintf("  %s → %s", sel[i].Name, d))
+		}
+	}
+	if len(preview) == 0 {
+		notify("no change")
+		return
+	}
+	fmt.Print("\n" + strings.Join(preview, "\n") + "\n")
+	if !confirm(fmt.Sprintf("Apply to %d entries?", len(preview))) {
+		return
+	}
+	ctx, cancel := call()
+	reply, err := s.c.EntryBulkDialer(ctx, &emxv1.EntryBulkDialerRequest{Items: reqs})
+	cancel()
+	if err != nil {
+		notify("error: %v", err)
+		return
+	}
+	notify("updated %d entries", len(reply.Entries))
 }
 
 // entrySetDialer changes (or clears) an entry's dialer from the checklist.

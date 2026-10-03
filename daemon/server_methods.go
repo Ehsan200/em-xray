@@ -142,49 +142,102 @@ func (s *Server) EntrySetConfig(ctx context.Context, req *emxv1.SetConfigRequest
 // master back into a plain entry, refused while an inbound still targets it as
 // master:NAME.
 func (s *Server) EntrySetDialer(ctx context.Context, req *emxv1.EntryDialerRequest) (*emxv1.EntryReply, error) {
-	e, err := s.store.GetEntry(uint(req.Id))
+	reply, err := s.EntryBulkDialer(ctx, &emxv1.EntryBulkDialerRequest{Items: []*emxv1.EntryDialerRequest{req}})
 	if err != nil {
 		return nil, err
 	}
-	dialer, err := xray.CanonicalDialer(req.Dialer)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.validateDialer(dialer, e.Name); err != nil {
-		return nil, err
-	}
-	if dialer != "" {
-		if err := xray.CheckMasterOutbound(e.Outbound); err != nil {
-			return nil, err
-		}
-	} else if e.IsMaster() {
-		ins, err := s.store.ListInbounds()
+	if len(reply.Entries) == 0 { // unchanged
+		e, err := s.store.GetEntry(uint(req.Id))
 		if err != nil {
 			return nil, err
 		}
-		for _, in := range ins {
-			if kind, name, _ := xray.ParseTarget(in.Target); kind == xray.KindMaster && xray.NormalizeName(name) == e.Name {
-				return nil, fmt.Errorf("inbound %q targets master:%s — retarget it first (or to xray:%s)", in.Name, e.Name, e.Name)
+		return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
+	}
+	return &emxv1.EntryReply{Entry: reply.Entries[0]}, nil
+}
+
+// EntryBulkDialer sets several entries' dialers together. Every item is checked
+// against the others' new dialers too (a cycle can only appear across two
+// edited entries), nothing is written unless all pass, and the change is
+// applied in one reconcile.
+func (s *Server) EntryBulkDialer(ctx context.Context, req *emxv1.EntryBulkDialerRequest) (*emxv1.EntryListReply, error) {
+	type change struct {
+		e      *xray.XrayEntry
+		dialer string
+	}
+	var changes []change
+	proposed := map[string]string{} // entry name → new dialer
+	seen := map[uint32]bool{}
+	for _, it := range req.Items {
+		if seen[it.Id] {
+			return nil, fmt.Errorf("entry id %d listed twice", it.Id)
+		}
+		seen[it.Id] = true
+		e, err := s.store.GetEntry(uint(it.Id))
+		if err != nil {
+			return nil, fmt.Errorf("entry id %d: %w", it.Id, err)
+		}
+		dialer, err := xray.CanonicalDialer(it.Dialer)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", e.Name, err)
+		}
+		proposed[e.Name] = dialer
+		if dialer != e.Dialer {
+			changes = append(changes, change{e, dialer})
+		}
+	}
+	var inbounds []xray.Inbound
+	for _, c := range changes {
+		if err := s.validateDialerWith(c.dialer, c.e.Name, proposed); err != nil {
+			return nil, fmt.Errorf("%s: %w", c.e.Name, err)
+		}
+		if c.dialer != "" {
+			if err := xray.CheckMasterOutbound(c.e.Outbound); err != nil {
+				return nil, fmt.Errorf("%s: %w", c.e.Name, err)
+			}
+			continue
+		}
+		if inbounds == nil {
+			var err error
+			if inbounds, err = s.store.ListInbounds(); err != nil {
+				return nil, err
+			}
+		}
+		for _, in := range inbounds {
+			if kind, name, _ := xray.ParseTarget(in.Target); kind == xray.KindMaster && xray.NormalizeName(name) == c.e.Name {
+				return nil, fmt.Errorf("inbound %q targets master:%s — retarget it first (or to xray:%s)", in.Name, c.e.Name, c.e.Name)
 			}
 		}
 	}
-	if dialer == e.Dialer {
-		return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
+	out := &emxv1.EntryListReply{}
+	if len(changes) == 0 {
+		return out, nil
 	}
-	e.Dialer = dialer
-	if err := s.store.UpdateEntry(e); err != nil {
+	set := map[uint]string{}
+	for _, c := range changes {
+		set[c.e.ID] = c.dialer
+		c.e.Dialer = c.dialer
+		out.Entries = append(out.Entries, entryInfo(*c.e))
+	}
+	if err := s.store.SetEntryDialers(set); err != nil {
 		return nil, err
 	}
 	if err := s.sup.Reconcile(); err != nil {
 		return nil, fmt.Errorf("saved, but reconcile failed: %w", err)
 	}
-	return &emxv1.EntryReply{Entry: entryInfo(*e)}, nil
+	return out, nil
 }
 
 // validateDialer rejects a master whose dialer is malformed, references a
 // missing entry/subscription, or would form a cycle. selfName is the entry being
 // added/edited (treated as already stored for cycle purposes).
 func (s *Server) validateDialer(dialer, selfName string) error {
+	return s.validateDialerWith(dialer, selfName, nil)
+}
+
+// validateDialerWith is validateDialer with other entries' not-yet-stored
+// dialers (name → dialer) taken into account for the cycle check.
+func (s *Server) validateDialerWith(dialer, selfName string, proposed map[string]string) error {
 	refs, err := xray.ParseDialer(dialer)
 	if err != nil {
 		return err
@@ -209,6 +262,9 @@ func (s *Server) validateDialer(dialer, selfName string) error {
 		}
 	}
 	return xray.DetectDialerCycle(selfName, dialer, func(name string) (string, bool) {
+		if d, ok := proposed[xray.NormalizeName(name)]; ok {
+			return d, true
+		}
 		e, err := s.store.GetEntryByName(name)
 		if err != nil {
 			return "", false

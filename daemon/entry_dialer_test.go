@@ -78,3 +78,57 @@ func TestEntrySetDialerMergesRefs(t *testing.T) {
 		t.Fatalf("clear: %v master=%v", err, reply.GetEntry().GetIsMaster())
 	}
 }
+
+// EntryBulkDialer validates every item (against the others' new dialers too)
+// before writing any, then applies them together.
+func TestEntryBulkDialer(t *testing.T) {
+	store, sup := newTestSupervisor(t)
+	srv := &Server{store: store, sup: sup}
+	socks := `{"protocol":"socks","settings":{"servers":[{"address":"203.0.113.9","port":1080}]}}`
+	ids := map[string]uint32{}
+	for _, n := range []string{"A", "B", "C", "relay"} {
+		e := &xray.XrayEntry{Name: n, Enabled: true, Outbound: socks}
+		if err := store.CreateEntry(e); err != nil {
+			t.Fatal(err)
+		}
+		ids[n] = uint32(e.ID)
+	}
+	ctx := context.Background()
+	bulk := func(kv ...string) (*emxv1.EntryListReply, error) {
+		req := &emxv1.EntryBulkDialerRequest{}
+		for i := 0; i < len(kv); i += 2 {
+			req.Items = append(req.Items, &emxv1.EntryDialerRequest{Id: ids[kv[i]], Dialer: kv[i+1]})
+		}
+		return srv.EntryBulkDialer(ctx, req)
+	}
+	dialerOf := func(n string) string {
+		e, err := store.GetEntryByName(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e.Dialer
+	}
+
+	// A cycle only visible across two edited entries.
+	if _, err := bulk("A", "xray:B", "B", "xray:A"); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("cross-entry cycle accepted: %v", err)
+	}
+	// One bad item → nothing written.
+	if _, err := bulk("A", "xray:relay", "B", "xraysub:missing"); err == nil {
+		t.Fatal("bad item accepted")
+	}
+	if d := dialerOf("A"); d != "" {
+		t.Fatalf("A written despite refused batch: %q", d)
+	}
+
+	reply, err := bulk("A", "xray:relay", "B", "xray:relay, xray:C", "C", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reply.Entries) != 2 { // C unchanged
+		t.Fatalf("changed = %+v, want A and B", reply.Entries)
+	}
+	if dialerOf("A") != "xray:relay" || dialerOf("B") != "xray:relay,xray:C" {
+		t.Fatalf("stored A=%q B=%q", dialerOf("A"), dialerOf("B"))
+	}
+}

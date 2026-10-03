@@ -323,6 +323,19 @@ func (s *Store) ListEntries() ([]XrayEntry, error) {
 
 func (s *Store) UpdateEntry(e *XrayEntry) error { return s.db.Save(e).Error }
 
+// SetEntryDialers sets the Dialer of several entries (id → dialer) in one
+// transaction: either all are written or none.
+func (s *Store) SetEntryDialers(dialers map[uint]string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for id, d := range dialers {
+			if err := tx.Model(&XrayEntry{}).Where("id = ?", id).Update("dialer", d).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (s *Store) DeleteEntry(id uint) error { return s.db.Delete(&XrayEntry{}, id).Error }
 
 // RenameEntry renames an entry and, atomically, everything bound to it by

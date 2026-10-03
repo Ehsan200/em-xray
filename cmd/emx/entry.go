@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -246,59 +247,51 @@ func entryDialerCmd() *cobra.Command {
 	var add, rm []string
 	var clear bool
 	c := &cobra.Command{
-		Use:   "dialer <id> [refs...]",
-		Short: "show or change a master's dialer (several subs/entries merge into one pool)",
-		Long: "Without refs or flags, prints the entry's dialer refs. Refs replace the\n" +
-			"dialer; --add/--rm edit it in place; --clear turns a master back into a\n" +
-			"plain entry. Every ref is xraysub:NAME (a subscription's nodes) or\n" +
-			"xray:NAME (one entry). All refs feed one pool the master's balancer picks\n" +
-			"from, so a dead subscription doesn't take the master down.\n\n" +
-			"  emx entry dialer 3 xraysub:nap xraysub:backup\n" +
+		Use:   "dialer <id|ids|masters|all> [refs...]",
+		Short: "show or change masters' dialers (several subs/entries merge into one pool)",
+		Long: "Without refs or flags, prints the dialer refs. Refs replace the dialer;\n" +
+			"--add/--rm edit it in place; --clear turns a master back into a plain\n" +
+			"entry. Every ref is xraysub:NAME (a subscription's nodes) or xray:NAME\n" +
+			"(one entry). All refs feed one pool the master's balancer picks from, so\n" +
+			"a dead subscription doesn't take the master down.\n\n" +
+			"Select several entries with a comma list of ids, `masters` (every entry\n" +
+			"with a dialer) or `all`: they're validated together (nothing changes if\n" +
+			"any is refused) and applied at once. --rm skips entries without the ref.\n\n" +
+			"  emx entry dialer 3 xraysub:mysub xraysub:backup\n" +
 			"  emx entry dialer 3 --add xray:my-vps\n" +
-			"  emx entry dialer 3 --rm xraysub:nap",
+			"  emx entry dialer 3,5,7 --add xraysub:backup\n" +
+			"  emx entry dialer masters --rm xraysub:mysub",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
-			if err != nil {
-				return err
-			}
 			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
 				list, err := cl.EntryList(ctx, &emxv1.Empty{})
 				if err != nil {
 					return err
 				}
-				var cur *emxv1.EntryInfo
-				for _, e := range list.Entries {
-					if e.Id == id {
-						cur = e
-					}
-				}
-				if cur == nil {
-					return fmt.Errorf("no entry with id %d", id)
+				sel, err := selectEntries(list.Entries, args[0])
+				if err != nil {
+					return err
 				}
 				out := cmd.OutOrStdout()
 				if len(args) == 1 && len(add) == 0 && len(rm) == 0 && !clear {
-					refs := splitRefs(cur.Dialer)
-					if len(refs) == 0 {
-						fmt.Fprintf(out, "%s: no dialer (plain entry)\n", cur.Name)
-					}
-					for _, r := range refs {
-						fmt.Fprintln(out, r)
+					for _, e := range sel {
+						printDialer(out, e, len(sel) > 1)
 					}
 					return nil
 				}
-				dialer, err := editDialer(cur.Dialer, args[1:], add, rm, clear)
+				items, err := editDialers(sel, args[1:], add, rm, clear)
 				if err != nil {
 					return err
 				}
-				reply, err := cl.EntrySetDialer(ctx, &emxv1.EntryDialerRequest{Id: id, Dialer: dialer})
+				reply, err := cl.EntryBulkDialer(ctx, &emxv1.EntryBulkDialerRequest{Items: items})
 				if err != nil {
 					return err
 				}
-				if reply.Entry.Dialer == "" {
-					fmt.Fprintf(out, "%s: no dialer (plain entry)\n", reply.Entry.Name)
-				} else {
-					fmt.Fprintf(out, "%s: dialer %s\n", reply.Entry.Name, reply.Entry.Dialer)
+				if len(reply.Entries) == 0 {
+					fmt.Fprintln(out, "no change")
+				}
+				for _, e := range reply.Entries {
+					printDialer(out, e, true)
 				}
 				return nil
 			})
@@ -308,6 +301,87 @@ func entryDialerCmd() *cobra.Command {
 	c.Flags().StringArrayVar(&rm, "rm", nil, "remove a ref; repeatable")
 	c.Flags().BoolVar(&clear, "clear", false, "remove every ref (the entry stops being a master)")
 	return c
+}
+
+// printDialer prints an entry's dialer: one ref per line, or on one line
+// prefixed by the entry name when listing several.
+func printDialer(out io.Writer, e *emxv1.EntryInfo, named bool) {
+	switch {
+	case e.Dialer == "":
+		fmt.Fprintf(out, "%s: no dialer (plain entry)\n", e.Name)
+	case named:
+		fmt.Fprintf(out, "%s: %s\n", e.Name, e.Dialer)
+	default:
+		for _, r := range splitRefs(e.Dialer) {
+			fmt.Fprintln(out, r)
+		}
+	}
+}
+
+// selectEntries resolves an entry selector: an id, a comma list of ids,
+// "masters" (entries with a dialer) or "all".
+func selectEntries(entries []*emxv1.EntryInfo, sel string) ([]*emxv1.EntryInfo, error) {
+	var out []*emxv1.EntryInfo
+	switch sel {
+	case "all":
+		out = entries
+	case "masters":
+		for _, e := range entries {
+			if e.IsMaster {
+				out = append(out, e)
+			}
+		}
+	default:
+		byID := map[uint32]*emxv1.EntryInfo{}
+		for _, e := range entries {
+			byID[e.Id] = e
+		}
+		for _, part := range splitRefs(sel) {
+			id, err := parseID(part)
+			if err != nil {
+				return nil, err
+			}
+			e, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("no entry with id %d", id)
+			}
+			if !slices.Contains(out, e) {
+				out = append(out, e)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no entries match %q", sel)
+	}
+	return out, nil
+}
+
+// editDialers applies one edit (see editDialer) to each selected entry. A
+// removed ref is skipped on entries that don't have it, but must be on at
+// least one, so a typo doesn't pass silently.
+func editDialers(sel []*emxv1.EntryInfo, set, add, rm []string, clear bool) ([]*emxv1.EntryDialerRequest, error) {
+	rmRefs := splitRefs(strings.Join(rm, ","))
+	for _, r := range rmRefs {
+		if !slices.ContainsFunc(sel, func(e *emxv1.EntryInfo) bool { return slices.Contains(splitRefs(e.Dialer), r) }) {
+			return nil, fmt.Errorf("no selected entry has dialer ref %q", r)
+		}
+	}
+	var items []*emxv1.EntryDialerRequest
+	for _, e := range sel {
+		have := splitRefs(e.Dialer)
+		var own []string
+		for _, r := range rmRefs {
+			if slices.Contains(have, r) {
+				own = append(own, r)
+			}
+		}
+		d, err := editDialer(e.Dialer, set, add, own, clear)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", e.Name, err)
+		}
+		items = append(items, &emxv1.EntryDialerRequest{Id: e.Id, Dialer: d})
+	}
+	return items, nil
 }
 
 // splitRefs splits a comma-separated dialer into trimmed, non-empty refs.
