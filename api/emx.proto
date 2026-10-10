@@ -410,6 +410,8 @@ message EntryInfo {
   bool mux = 6;          // stored mux opt-in
   string mux_note = 7;   // why mux can't apply to this outbound ("" = it can)
   string protocol = 8;   // outbound protocol (vless, wireguard, …)
+  string share_link = 9;       // link rebuilt from the outbound ("" = none)
+  string share_link_note = 10; // why there is no share link
 }
 message EntryReply { EntryInfo entry = 1; }
 message EntryListReply { repeated EntryInfo entries = 1; }

@@ -21,7 +21,8 @@ func entryCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return runMenu(cmd, "entry") },
 	}
 	c.AddCommand(entryAddCmd(), entryListCmd(), entryRemoveCmd(), entryRenameCmd(),
-		entryDuplicateCmd(), entryEditCmd(), entryTestCmd(), entryMuxCmd(), entryDialerCmd())
+		entryDuplicateCmd(), entryEditCmd(), entryTestCmd(), entryMuxCmd(), entryDialerCmd(),
+		entryLinkCmd())
 	return c
 }
 
@@ -48,6 +49,55 @@ func entryDuplicateCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+func entryLinkCmd() *cobra.Command {
+	var qr bool
+	c := &cobra.Command{
+		Use:   "link <id|ids|masters|all>",
+		Short: "export entries as share links (vless/vmess/trojan/ss/hysteria2)",
+		Long: "Rebuilds each entry's share link from its current outbound, so edits made\n" +
+			"after adding it are included. Links go to stdout one per line (ready for a\n" +
+			"client or a subscription file); entries with no link form (freedom,\n" +
+			"wireguard, …) are reported on stderr. Dialer and mux are emx-side and are\n" +
+			"not part of the link.\n\n" +
+			"  emx entry link 3\n" +
+			"  emx entry link 3 --qr\n" +
+			"  emx entry link all > links.txt",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withClient(cmd, func(ctx context.Context, cl emxv1.DaemonClient) error {
+				list, err := cl.EntryList(ctx, &emxv1.Empty{})
+				if err != nil {
+					return err
+				}
+				sel, err := selectEntries(list.Entries, args[0])
+				if err != nil {
+					return err
+				}
+				out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+				n := 0
+				for _, e := range sel {
+					if e.ShareLink == "" {
+						fmt.Fprintf(errOut, "%s: no share link: %s\n", e.Name, e.ShareLinkNote)
+						continue
+					}
+					n++
+					if qr {
+						fmt.Fprintf(out, "%s\n\n%s\n%s\n\n", e.Name, renderQR(e.ShareLink), e.ShareLink)
+					} else {
+						fmt.Fprintln(out, e.ShareLink)
+					}
+				}
+				if n == 0 {
+					return fmt.Errorf("no share links to export")
+				}
+				return nil
+			})
+		},
+	}
+	c.Flags().BoolVar(&qr, "qr", false, "print each link as a QR code too")
+	return c
 }
 
 func entryEditCmd() *cobra.Command {

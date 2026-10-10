@@ -3608,9 +3608,11 @@ type EntryInfo struct {
 	Enabled       bool                   `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	IsMaster      bool                   `protobuf:"varint,4,opt,name=is_master,json=isMaster,proto3" json:"is_master,omitempty"`
 	Dialer        string                 `protobuf:"bytes,5,opt,name=dialer,proto3" json:"dialer,omitempty"`
-	Mux           bool                   `protobuf:"varint,6,opt,name=mux,proto3" json:"mux,omitempty"`                       // stored mux opt-in
-	MuxNote       string                 `protobuf:"bytes,7,opt,name=mux_note,json=muxNote,proto3" json:"mux_note,omitempty"` // why mux can't apply to this outbound ("" = it can)
-	Protocol      string                 `protobuf:"bytes,8,opt,name=protocol,proto3" json:"protocol,omitempty"`              // outbound protocol (vless, wireguard, …)
+	Mux           bool                   `protobuf:"varint,6,opt,name=mux,proto3" json:"mux,omitempty"`                                            // stored mux opt-in
+	MuxNote       string                 `protobuf:"bytes,7,opt,name=mux_note,json=muxNote,proto3" json:"mux_note,omitempty"`                      // why mux can't apply to this outbound ("" = it can)
+	Protocol      string                 `protobuf:"bytes,8,opt,name=protocol,proto3" json:"protocol,omitempty"`                                   // outbound protocol (vless, wireguard, …)
+	ShareLink     string                 `protobuf:"bytes,9,opt,name=share_link,json=shareLink,proto3" json:"share_link,omitempty"`                // link rebuilt from the outbound ("" = none)
+	ShareLinkNote string                 `protobuf:"bytes,10,opt,name=share_link_note,json=shareLinkNote,proto3" json:"share_link_note,omitempty"` // why there is no share link
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3697,6 +3699,20 @@ func (x *EntryInfo) GetMuxNote() string {
 func (x *EntryInfo) GetProtocol() string {
 	if x != nil {
 		return x.Protocol
+	}
+	return ""
+}
+
+func (x *EntryInfo) GetShareLink() string {
+	if x != nil {
+		return x.ShareLink
+	}
+	return ""
+}
+
+func (x *EntryInfo) GetShareLinkNote() string {
+	if x != nil {
+		return x.ShareLinkNote
 	}
 	return ""
 }
@@ -4827,7 +4843,7 @@ const file_emx_proto_rawDesc = "" +
 	"\routbound_json\x18\x03 \x01(\tR\foutboundJson\x12\x16\n" +
 	"\x06dialer\x18\x04 \x01(\tR\x06dialer\x12\x18\n" +
 	"\aenabled\x18\x05 \x01(\bR\aenabled\x12\x10\n" +
-	"\x03mux\x18\x06 \x01(\bR\x03mux\"\xc7\x01\n" +
+	"\x03mux\x18\x06 \x01(\bR\x03mux\"\x8e\x02\n" +
 	"\tEntryInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -4836,7 +4852,11 @@ const file_emx_proto_rawDesc = "" +
 	"\x06dialer\x18\x05 \x01(\tR\x06dialer\x12\x10\n" +
 	"\x03mux\x18\x06 \x01(\bR\x03mux\x12\x19\n" +
 	"\bmux_note\x18\a \x01(\tR\amuxNote\x12\x1a\n" +
-	"\bprotocol\x18\b \x01(\tR\bprotocol\"5\n" +
+	"\bprotocol\x18\b \x01(\tR\bprotocol\x12\x1d\n" +
+	"\n" +
+	"share_link\x18\t \x01(\tR\tshareLink\x12&\n" +
+	"\x0fshare_link_note\x18\n" +
+	" \x01(\tR\rshareLinkNote\"5\n" +
 	"\n" +
 	"EntryReply\x12'\n" +
 	"\x05entry\x18\x01 \x01(\v2\x11.emx.v1.EntryInfoR\x05entry\"=\n" +

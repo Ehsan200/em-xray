@@ -990,9 +990,10 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 	i, ok := runSelect(fmt.Sprintf("%s (%s)", e.Name, kind), []selectItem{
 		{"Test", "measure real latency through this outbound"},
 		{"Rename", ""}, {"Duplicate", ""}, {"Edit JSON", ""}, {"Remove", ""},
-		{"Toggle mux", muxDesc}, {"Dialer", dialerDesc(e)}, {"← Back", ""},
+		{"Toggle mux", muxDesc}, {"Dialer", dialerDesc(e)},
+		{"Show link", e.ShareLinkNote}, {"Show QR code", ""}, {"← Back", ""},
 	})
-	if !ok || i == 7 {
+	if !ok || i == 9 {
 		return
 	}
 	switch i {
@@ -1053,6 +1054,15 @@ func (s *menuSession) entryActions(e *emxv1.EntryInfo) {
 		}
 	case 6:
 		s.entrySetDialer(e)
+	case 7, 8:
+		switch {
+		case e.ShareLink == "":
+			notify("no share link: %s", e.ShareLinkNote)
+		case i == 7:
+			fmt.Println("\n" + e.ShareLink + "\n")
+		default:
+			fmt.Printf("\n%s\n\n%s\n%s\n", e.Name, renderQR(e.ShareLink), e.ShareLink)
+		}
 	}
 }
 

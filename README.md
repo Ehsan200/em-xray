@@ -253,9 +253,16 @@ emx sub test <id> [fingerprint]             real latency per node (persisted)
 emx entry add <name> --link <share> | --outbound <json> [--dialer <refs>] [--mux]
 emx entry mux <id> on|off                   multiplex streams over a few tunnels (per entry)
 emx entry dialer <id|ids|masters|all> [refs…] [--add R] [--rm R] [--clear]   show / change dialers
+emx entry link <id|ids|masters|all> [--qr]   export share links (one per line)
 emx entry ls | rm <id> | rename <id> <name> | duplicate <id> [name] | edit <id>
 emx entry test [id]
 ```
+
+`emx entry link` rebuilds each entry's share link (vless/vmess/trojan/ss/hysteria2) from its
+current outbound, so edits made after adding it are included: `emx entry link all > links.txt`
+exports everything, `emx entry link 3 --qr` shows one as a QR code (also in the TUI: Entries →
+entry → Show link / Show QR code). Entries with no link form (freedom, wireguard, …) are
+reported on stderr. Dialer and mux live in emx, not in the link.
 
 A master's dialer can name several subscriptions and entries (e.g. `--dialer
 "xraysub:mysub,xraysub:backup,xray:my-vps"`, or check them in the TUI's Entries → master → Dialer

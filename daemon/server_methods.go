@@ -279,11 +279,17 @@ func entryInfo(e xray.XrayEntry) *emxv1.EntryInfo {
 		Protocol string `json:"protocol"`
 	}
 	_ = json.Unmarshal([]byte(e.Outbound), &ob)
-	return &emxv1.EntryInfo{
+	info := &emxv1.EntryInfo{
 		Id: uint32(e.ID), Name: e.Name, Enabled: e.Enabled,
 		IsMaster: e.IsMaster(), Dialer: e.Dialer,
 		Mux: e.Mux, MuxNote: note, Protocol: ob.Protocol,
 	}
+	if link, err := xray.OutboundLink(e.Outbound, e.Name); err != nil {
+		info.ShareLinkNote = err.Error()
+	} else {
+		info.ShareLink = link
+	}
+	return info
 }
 
 // EntrySetMux stores the entry's mux opt-in and applies it (live: the entry's
