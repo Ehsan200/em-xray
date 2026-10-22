@@ -22,6 +22,17 @@ func systemdCmd() *cobra.Command {
 	return c
 }
 
+// rootSystemScope forces system scope for root unless --system was given
+// explicitly. A root user unit only starts while root has a login session (or
+// lingering), so it silently stays down after a reboot, and the rest of emx
+// (update, restart) already treats root as system scope.
+func rootSystemScope(cmd *cobra.Command, system bool) bool {
+	if os.Geteuid() == 0 && !cmd.Flags().Changed("system") {
+		return true
+	}
+	return system
+}
+
 // unitPath returns the service file location for a user or system install.
 func unitPath(system bool) (string, error) {
 	if system {
@@ -69,11 +80,12 @@ func systemdInstallCmd() *cobra.Command {
 	var system, now bool
 	c := &cobra.Command{
 		Use:   "install",
-		Short: "write + enable the systemd unit (user-level by default)",
+		Short: "write + enable the systemd unit (user-level by default; system-wide as root)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if runtime.GOOS != "linux" {
 				return fmt.Errorf("systemd is Linux-only (this is %s); use `emx systemd print` to view the unit", runtime.GOOS)
 			}
+			system = rootSystemScope(cmd, system)
 			exe, err := os.Executable()
 			if err != nil {
 				return err
@@ -90,6 +102,14 @@ func systemdInstallCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "wrote %s\n", path)
+			if system && os.Geteuid() == 0 {
+				// A root user unit from an older install would never start on boot.
+				if stale, err := unitPath(false); err == nil {
+					if os.Remove(stale) == nil {
+						fmt.Fprintf(out, "removed stale user unit %s\n", stale)
+					}
+				}
+			}
 
 			if _, err := exec.LookPath("systemctl"); err != nil {
 				fmt.Fprintln(out, "systemctl not found — enable it manually once available")
@@ -130,6 +150,7 @@ func systemdUninstallCmd() *cobra.Command {
 		Use:   "uninstall",
 		Short: "disable + remove the systemd unit",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			system = rootSystemScope(cmd, system)
 			path, err := unitPath(system)
 			if err != nil {
 				return err
@@ -157,6 +178,7 @@ func systemdPrintCmd() *cobra.Command {
 		Use:   "print",
 		Short: "print the systemd unit without installing it",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			system = rootSystemScope(cmd, system)
 			exe, err := os.Executable()
 			if err != nil {
 				return err
