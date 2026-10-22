@@ -86,7 +86,7 @@ func systemdInstallCmd() *cobra.Command {
 				return fmt.Errorf("systemd is Linux-only (this is %s); use `emx systemd print` to view the unit", runtime.GOOS)
 			}
 			system = rootSystemScope(cmd, system)
-			exe, err := os.Executable()
+			exe, err := executable()
 			if err != nil {
 				return err
 			}
@@ -179,7 +179,7 @@ func systemdPrintCmd() *cobra.Command {
 		Short: "print the systemd unit without installing it",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			system = rootSystemScope(cmd, system)
-			exe, err := os.Executable()
+			exe, err := executable()
 			if err != nil {
 				return err
 			}
@@ -217,7 +217,7 @@ func refreshSystemdUnit(out io.Writer) error {
 	}
 	system := os.Geteuid() == 0
 	path, _ := unitPath(system)
-	exe, err := os.Executable()
+	exe, err := executable()
 	if err != nil {
 		return err
 	}

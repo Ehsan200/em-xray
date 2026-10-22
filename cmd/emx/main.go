@@ -13,6 +13,15 @@ import (
 // version is stamped at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+// exePath is resolved once, at startup. After `emx update` renames the new
+// binary over this one, Linux names the running (now deleted) executable after
+// the temp file it was replaced by, so a later os.Executable() returns
+// .emx-update-* — which then went into the systemd unit's ExecStart.
+var exePath, exePathErr = os.Executable()
+
+// executable returns this binary's path as it was when the process started.
+func executable() (string, error) { return exePath, exePathErr }
+
 func main() {
 	daemon.SetVersion(version)
 	if err := rootCmd().Execute(); err != nil {

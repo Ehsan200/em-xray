@@ -47,7 +47,7 @@ func startDetached(cmd *cobra.Command) error {
 		return nil
 	}
 
-	exe, err := os.Executable()
+	exe, err := executable()
 	if err != nil {
 		return err
 	}
@@ -161,6 +161,10 @@ func restartDaemon(cmd *cobra.Command) error {
 	// An upgrade can move the runtime directory, so a daemon started by the
 	// previous build is invisible to the pid file but still owns an xray child.
 	stopStaleProcesses(cmd)
+	// Repairs a unit an older update left pointing at a temp binary.
+	if err := refreshSystemdUnit(cmd.OutOrStdout()); err != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "warning: %v\n", err)
+	}
 	// Keep a systemd-managed daemon under systemd — including one whose unit
 	// is installed but stopped or failed: `systemctl restart` starts it, where
 	// spawning a detached daemon would leave an unmanaged one beside the unit.

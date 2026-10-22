@@ -260,9 +260,6 @@ func human(n int64) string {
 // the new daemon answers with the new version and its xray is up.
 func finishUpdate(cmd *cobra.Command, want string) error {
 	out := cmd.OutOrStdout()
-	if err := refreshSystemdUnit(out); err != nil {
-		fmt.Fprintf(out, "warning: %v\n", err)
-	}
 	fmt.Fprintln(out, "restarting daemon…")
 	if err := restartDaemon(cmd); err != nil {
 		return fmt.Errorf("binary installed, but the daemon did not start: %w (see `emx xray logs`)", err)
