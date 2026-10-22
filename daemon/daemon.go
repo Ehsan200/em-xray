@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"slices"
 	"syscall"
 	"time"
@@ -45,7 +46,16 @@ func pickLoopbackPort(logger *log.Logger, what string, def int, avoid ...int) in
 // Run is the daemon entrypoint (invoked by the detached `emx daemon run`). It
 // binds the control socket, serves gRPC, supervises the xray child, and blocks
 // until stopped by signal, context cancel, or the Shutdown RPC.
+// daemonMemLimit is the daemon's soft Go heap limit unless $GOMEMLIMIT sets
+// one. Its live heap is a few MB; the limit only makes the GC hand freed memory
+// back sooner, so a burst (a large subscription refresh, a probe round) doesn't
+// sit in RSS on a small box that also runs other proxies.
+const daemonMemLimit = 64 << 20
+
 func Run(ctx context.Context) error {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(daemonMemLimit)
+	}
 	p := paths.Default()
 	if err := p.EnsureDirs(); err != nil {
 		return err
