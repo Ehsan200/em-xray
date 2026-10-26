@@ -47,7 +47,7 @@ build-linux:
 	TARGET=$(if $(filter arm64,$(ARCH)),linux-arm64-v8a,linux-64) \
 	./scripts/fetch-xray.sh
 	mkdir -p dist
-	GOOS=linux GOARCH=$(ARCH) go build -ldflags '$(LDFLAGS)' -o dist/emx-linux-$(ARCH) $(PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -ldflags '$(LDFLAGS)' -o dist/emx-linux-$(ARCH) $(PKG)
 	@echo ">> dist/emx-linux-$(ARCH) ready — scp it to the server"
 
 ## run: build + start the daemon in the foreground

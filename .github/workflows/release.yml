@@ -49,6 +49,10 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          # Static binary: linux/amd64 builds natively on the runner, where Go
+          # would otherwise enable cgo and link the runner's (new) glibc —
+          # breaking servers on older distros ("GLIBC_2.34 not found").
+          CGO_ENABLED: '0'
         run: |
           out="dist/emx-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p "$out"
